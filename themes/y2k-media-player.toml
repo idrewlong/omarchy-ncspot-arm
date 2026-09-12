@@ -1,0 +1,47 @@
+# Y2K Windows Media Player vibe: black "Now Playing" pane, green LCD-style
+# track text, and a silvery statusbar with a Luna-blue selection highlight.
+initial_screen = "cover"
+statusbar_format = "♪ %artists - %title"
+# ncspot already draws live shuffle/repeat/volume state on the right side of
+# the statusbar -- it's just bracket text ([R]/[Z]) unless this is on, which
+# swaps in real icon glyphs (repeat-once/repeat-all/shuffle) for the WMP-era
+# button feel. They're real, always-current toggle indicators already wired
+# to lowercase z (shuffle) and r (repeat), not decoration -- there was just
+# nothing to show until you'd used either.
+use_nerdfont = true
+
+[track_format]
+left = "%artists - %title"
+center = "%album"
+right = "%saved %duration"
+
+[notification_format]
+title = "%title"
+body = "%artists"
+
+[theme]
+background = "black"
+primary = "light gray"
+secondary = "gray"
+title = "light blue"
+playing = "light green"
+playing_selected = "light green"
+playing_bg = "black"
+highlight = "black"
+highlight_bg = "light blue"
+error = "light white"
+error_bg = "red"
+statusbar = "black"
+statusbar_progress = "light blue"
+statusbar_bg = "light gray"
+cmdline = "light white"
+cmdline_bg = "black"
+search_match = "yellow"
+
+[keybindings]
+# ncspot's real defaults don't follow the usual media-player convention
+# (Space queues instead of pausing; play/pause is Shift+P). Remap to the
+# familiar scheme.
+"Space" = "playpause"
+"n" = "next"
+"p" = "previous"

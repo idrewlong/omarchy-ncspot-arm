@@ -31,6 +31,9 @@ This repo:
    widget — since `omarchy.media` is a generic MPRIS control surface with no
    way to know ncspot's "window" is a detached `tmux` session. Click it to
    open the TUI back up.
+6. Ships an optional [Y2K Windows Media Player theme](#themes) for the TUI
+   itself — colors and format strings are all ncspot already supports, no
+   patch needed.
 
 ## Requirements
 
@@ -73,11 +76,41 @@ out of the pane yourself.)
 
 ## Browsing / queueing music
 
-`ncspot` is a full TUI — reattach any time to search/browse/queue:
+`ncspot` is a full TUI — reattach any time to search/browse/queue, either by
+clicking the music-note bar-widget icon, or by hand:
 
 ```sh
-tmux attach -t ncspot
+tmux attach -d -t ncspot
 ```
+
+Use `-d` (detach any other client first): tmux clamps a session shared by
+multiple attached clients to the *smallest* one's size, which will silently
+clip the bottom of ncspot's UI — that's exactly where the statusbar's
+title/artist line lives, so a stray second attachment makes it look like
+ncspot forgot how to show what's playing.
+
+## Themes
+
+[`themes/y2k-media-player.toml`](themes/y2k-media-player.toml) is a
+config.toml drop-in for an early-2000s Windows Media Player look: black
+"Now Playing" pane (`initial_screen = "cover"`, and the `cover` feature this
+repo already builds with renders real album art in the terminal), a
+Luna-blue selection highlight, green LCD-style track text, and
+`use_nerdfont = true` so ncspot's already-live shuffle/repeat/volume status
+(bound to `z`/`r`, on the right of the statusbar) draws as real icon glyphs
+instead of bracket text — genuine current-state indicators, not decoration,
+they just don't show anything until you've used shuffle or repeat once.
+
+```sh
+cp themes/y2k-media-player.toml ~/.config/ncspot/config.toml
+```
+
+Colors and format strings are config-only (see ncspot's own
+[theming docs](https://github.com/hrkfdn/ncspot/blob/main/doc/users.md#theming));
+tweak freely. Restart the session (`:quit` inside ncspot, or
+`tmux kill-session -t ncspot` — the keepalive plugin respawns it) to pick up
+theme and `initial_screen` changes; `:reload` only covers keybindings and
+format strings.
 
 ## Known ncspot issues
 
@@ -101,18 +134,9 @@ reports `unhandled` even while a track is actively playing; with it, a
 
 **ncspot's default keybindings don't match the usual media-player
 convention.** `Space` queues the selected track/playlist, not
-play/pause — that's `Shift+P`. If you want the familiar scheme, add to
-`~/.config/ncspot/config.toml`:
-
-```toml
-[keybindings]
-"Space" = "playpause"
-"n" = "next"
-"p" = "previous"
-```
-
-(Run `:reload` inside `ncspot`, or restart the session, to pick up config
-changes.)
+play/pause — that's `Shift+P`. [`themes/y2k-media-player.toml`](themes/y2k-media-player.toml)
+remaps the familiar scheme (`Space`/`n`/`p`); `:reload` inside `ncspot`
+picks up a keybinding-only change without a restart.
 
 ## License
 
