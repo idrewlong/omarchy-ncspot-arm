@@ -21,7 +21,15 @@ BarWidget {
     text: "󰝚"
     tooltipText: "Open ncspot"
     onPressed: function(b) {
-      root.bar.run("omarchy-launch-terminal bash -c 'tmux attach -t ncspot || tmux new -s ncspot ncspot'")
+      // --app-id=TUI.float gets Omarchy's default floating+centered+875x600
+      // treatment (see default/hypr/apps/system.lua) instead of whatever
+      // sliver a tiling layout has free -- ncspot needs real rows to fit its
+      // tab bar, list, and two-line statusbar without clipping the bottom
+      // line (where the title/artist live). `attach -d` detaches any other
+      // client on the session first: tmux clamps a shared session to the
+      // *smallest* attached client's size, so a second, smaller terminal
+      // left open elsewhere would silently shrink this one back down.
+      root.bar.run("omarchy-launch-terminal --app-id=TUI.float bash -c 'tmux attach -d -t ncspot || tmux new -s ncspot ncspot'")
     }
   }
 }

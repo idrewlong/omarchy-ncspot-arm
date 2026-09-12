@@ -51,4 +51,8 @@ else
 fi
 
 echo "==> Attaching to the ncspot session (Ctrl+b then d to detach)"
-exec tmux attach -t "$session"
+# -d detaches any other client on this session first: tmux clamps a shared
+# session to the smallest attached client's size, so a smaller terminal left
+# open elsewhere (e.g. the bar-widget button's window) would otherwise
+# silently shrink this one, clipping the tab bar/statusbar.
+exec tmux attach -d -t "$session"

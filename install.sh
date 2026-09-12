@@ -51,13 +51,13 @@ else
   omarchy plugin add "$(git -C "$repo_dir" remote get-url origin 2>/dev/null || echo "https://github.com/idrewlong/omarchy-ncspot-arm")" --enable
 fi
 
-cat <<'EOF'
+cat <<EOF
 
 ==> Done. One manual step remains: log in to Spotify once.
 
-    tmux new -s ncspot ncspot
+    $repo_dir/omarchy-ncspot-login
 
-Follow the OAuth prompt (opens your browser). Once logged in and playing,
-detach with Ctrl+b then d -- the keepalive service will keep the session
-alive from here on, and the Media bar widget will show now-playing/controls.
+Approve the login in your browser, then detach with Ctrl+b then d -- the
+keepalive service will keep the session alive from here on, and the Media
+bar widget will show now-playing/controls.
 EOF
