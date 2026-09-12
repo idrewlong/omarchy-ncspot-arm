@@ -1,54 +1,130 @@
-# Y2K Windows Media Player vibe: black background, green LCD-style track
-# text, and a silvery statusbar with a Luna-blue selection highlight.
+# Y2K Windows Media Player (Luna era) for ncspot.
+#
+# What this actually is: ncspot is an ncurses TUI, so everything below is
+# text, color and format strings. There is no skin chrome, no rounded
+# window bezel, no visualizer -- ncspot has no audio-reactive rendering of
+# any kind (verified against v1.4.0 source; the word doesn't appear in it).
+# What it *can* do convincingly is the WMP color story: a black Now Playing
+# panel, a silver transport bar across the bottom, a Luna-blue seek bar and
+# selection, and LCD-green text on whatever is currently playing.
+#
+# Colors: ncspot hands these to cursive's Color::parse, which accepts
+# "black"/"red"/"green"/"yellow"/"blue"/"magenta"/"cyan"/"white", each
+# optionally prefixed "light " or "dark ", plus "default", plus hex
+# (#rrggbb / 0xrrggbb / bare rrggbb). Note what is NOT in that list: "gray".
+# "gray" and "light gray" fail to parse and silently fall back to a default
+# with only a log warning -- an earlier version of this file used both, so
+# the "silver" statusbar was never actually silver. Hex is used below to
+# avoid that whole class of mistake.
+#
+# This package builds ncspot against the ncurses backend, which quantizes
+# hex down to the xterm-256 palette rather than emitting truecolor. Greys
+# with r==g==b land on the 24-step 232-255 ramp (so silver stays clean);
+# other colors snap to the 6x6x6 cube. That's why the values below are
+# picked to sit near cube/ramp entries instead of being exact WMP hex.
 #
 # initial_screen deliberately isn't "cover": that view shows the *least*
-# text (no title/artist visible at all outside the statusbar), and terminal
-# image protocols vary in how cleanly they composite over/around surrounding
-# text -- exactly the wrong tradeoff when title/artist visibility is the
-# actual goal. Land on the library instead; press F8 any time to peek at
-# cover art on purpose.
+# text (no title/artist visible at all outside the statusbar). Land on the
+# library instead; press F8 any time to peek at cover art on purpose.
 initial_screen = "library"
-statusbar_format = "♪ %artists - %title"
-# ncspot already draws live shuffle/repeat/volume state on the right side of
-# the statusbar -- it's just bracket text ([R]/[Z]) unless this is on, which
-# swaps in real icon glyphs (repeat-once/repeat-all/shuffle) for the WMP-era
-# button feel. They're real, always-current toggle indicators already wired
-# to Z (shuffle) and R (repeat), not decoration -- there was just nothing to
-# show one until you'd used either.
+
+# Keep F8 cover art from scaling past 2x its native resolution and filling
+# the pane with a soft blur.
+cover_max_scale = 2
+
+# The bottom row is ncspot's transport bar, and it is genuinely interactive:
+# left-click toggles play/pause, left-click on the seek bar directly above
+# it jumps to that position, and the scroll wheel over the [nn%] readout
+# changes volume. The play/pause glyph at the far left is a live indicator
+# of real state, not a drawn-on button.
+#
+# use_nerdfont swaps the bracket text ([R]/[Z]/[U]) for real icon glyphs and
+# gives %saved a heart instead of a checkmark. Needs a Nerd Font in the
+# terminal -- foot is configured with JetBrainsMono Nerd Font here.
+# The shuffle and repeat glyphs render *only while those modes are on*
+# (ncspot draws an empty string for shuffle-off and repeat-off), so there is
+# nothing there until you press the key once. That's ncspot's behavior, not
+# a missing setting.
+#
+# The keys are lowercase `z` (shuffle) and `r` (repeat) -- uppercase Z and R
+# are not bound to anything, so pressing those looks like the feature is
+# broken. `r` cycles three ways: off -> repeat-playlist -> repeat-track.
 use_nerdfont = true
 
+# flip_status_indicators = true would show a pause glyph while playing --
+# i.e. what clicking does, the way WMP's transport button behaves. Left off
+# so the bar stays a state readout rather than an action readout.
+
+# WMP's taskbar/status readout was just "Artist - Title", so that's this.
+# %album is available here too, but it's left out on purpose: a huge share of
+# tracks are singles whose album name *is* the title, and those render as
+# "Survivor's Remorse - Survivor's Remorse". Album is one F8/album-view away.
+#
+# This has to stay above [track_format]: it's a top-level key, and any bare
+# key written after a table header gets parsed into that table instead of
+# the root, where ncspot silently never sees it.
+statusbar_format = "%artists  ―  %title"
+
+# WMP's Now Playing list columns were Title / Artist / Length, and ncspot
+# gives exactly three slots, so that maps over cleanly. Album doesn't fit --
+# there is no fourth slot. There is also no placeholder for "this row is
+# playing" (the full set is %artists %artist %title %album %saved
+# %duration), so the playing row is marked by color only -- no left-gutter
+# arrow like WMP had. %saved draws a heart here because use_nerdfont is on.
 [track_format]
-left = "%artists - %title"
-center = "%album"
-right = "%saved %duration"
+left = "%title"
+center = "%artists"
+right = "%saved  %duration"
 
 [notification_format]
 title = "%title"
 body = "%artists"
 
 [theme]
+# The Now Playing panel: black, like WMP's visualization pane.
 background = "black"
-primary = "light gray"
-secondary = "gray"
-title = "light blue"
-playing = "light green"
-playing_selected = "light green"
+primary = "#d4d4d4"     # silver list text
+secondary = "#8a8a8a"   # dimmed: local files, unplayable tracks
+title = "#6badf7"       # Luna light blue, for pane titles and tabs
+
+# Currently-playing track: LCD lime on black, stereo-component style.
+playing = "#00e000"
 playing_bg = "black"
-highlight = "black"
-highlight_bg = "light blue"
-error = "light white"
-error_bg = "red"
+# Drawn on highlight_bg (not playing_bg) when the playing row is also the
+# selected row, so this has to stay readable against the Luna blue below.
+playing_selected = "#5cff5c"
+
+# Selection: white on Luna blue, the XP/WMP list selection exactly.
+highlight = "#ffffff"
+highlight_bg = "#316ac5"
+# Selection in a pane that doesn't have focus goes flat grey, the way
+# Windows dropped an inactive listview's selection to grey.
+highlight_inactive_bg = "#585858"
+
+# The transport bar: black text on silver chrome.
 statusbar = "black"
-statusbar_progress = "light blue"
-statusbar_bg = "light gray"
-cmdline = "light white"
+statusbar_bg = "#c0c0c0"
+# The seek bar is the row *above* the silver bar, and ncspot hardcodes its
+# background to the main `background` above rather than statusbar_bg -- so
+# it reads as a lit progress meter on black, not as part of the chrome.
+# Filled portion Luna blue, unfilled a recessed grey groove.
+statusbar_progress = "#3f8fef"
+statusbar_progress_bg = "#6e6e6e"
+
+error = "#ffffff"
+error_bg = "#c00000"
+cmdline = "#d4d4d4"
 cmdline_bg = "black"
-search_match = "yellow"
+search_match = "#ffd700"
 
 [keybindings]
 # ncspot's real defaults don't follow the usual media-player convention
-# (Space queues instead of pausing; play/pause is Shift+P). Remap to the
-# familiar scheme.
+# (Space queues instead of pausing; play/pause is Shift+P, and next/previous
+# are > and <). Remap to the familiar scheme.
+#
+# Note this costs one stock binding: `n` is normally jump-to-next-search-
+# match. Shift+N (jump to previous match) is left alone, and `<`/`>` still
+# work for prev/next, so nothing is unreachable.
 "Space" = "playpause"
 "n" = "next"
 "p" = "previous"

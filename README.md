@@ -92,31 +92,72 @@ ncspot forgot how to show what's playing.
 ## Themes
 
 [`themes/y2k-media-player.toml`](themes/y2k-media-player.toml) is a
-config.toml drop-in for an early-2000s Windows Media Player look: black
-background, a Luna-blue selection highlight, green LCD-style track text,
-and `use_nerdfont = true` so ncspot's already-live shuffle/repeat/volume
-status (bound to `Z`/`R`, on the right of the statusbar) draws as real icon
-glyphs instead of bracket text — genuine current-state indicators, not
-decoration, they just don't show anything until you've used shuffle or
-repeat once.
+config.toml drop-in for an early-2000s Windows Media Player look:
+
+```sh
+cp themes/y2k-media-player.toml ~/.config/ncspot/config.toml
+```
+
+**What it gets you.** A black "Now Playing" field, LCD-lime text on the
+currently-playing track, white-on-Luna-blue selection (with Windows' flat
+grey selection for panes that don't have focus), a blue seek bar in a
+recessed grey groove, and a silver transport bar across the bottom with
+black text. The playlist columns are remapped to WMP's Now Playing order —
+Title / Artist / Length — and `use_nerdfont = true` turns ncspot's bracket
+text (`[R]`/`[Z]`/`[U]`) into real icon glyphs and gives saved tracks a
+heart.
+
+**What it can't get you.** ncspot is an ncurses TUI: there is no skin
+chrome, no window bezel, and **no visualizer** — ncspot has no
+audio-reactive rendering of any kind (there's no such feature in the v1.4.0
+source). There's no "now playing" arrow in the playlist gutter either,
+because no format-string placeholder exposes which row is playing; that row
+is marked by color alone. And the album column doesn't exist — ncspot gives
+exactly three slots and Title/Artist/Length fill them.
+
+**The transport bar is real, though.** It's not drawn-on decoration:
+left-click toggles play/pause, left-click on the seek bar jumps to that
+position, and the scroll wheel over the `[nn%]` readout changes volume. The
+play/pause glyph at the far left is a live state indicator.
+
+The shuffle and repeat glyphs on the right are live state too — which is
+why there's nothing there at first. ncspot draws an empty string when
+shuffle and repeat are off, so they only appear once you turn them on. The
+keys are lowercase **`z`** (shuffle) and **`r`** (repeat, cycling off →
+repeat-playlist → repeat-track); uppercase `Z`/`R` aren't bound to
+anything, so pressing those makes it look broken.
 
 It deliberately opens on the library (`initial_screen = "library"`) rather
 than `cover`: this repo's build does support rendering real album art in
 the terminal, but that view shows the *least* text — no title/artist
 visible at all outside the statusbar — which is exactly the wrong tradeoff
 when title/artist visibility is the actual goal. Press `F8` any time to
-peek at cover art on purpose.
+peek at cover art on purpose (`cover_max_scale = 2` keeps it from filling
+the pane with a soft blur).
 
-```sh
-cp themes/y2k-media-player.toml ~/.config/ncspot/config.toml
-```
+**Colors.** ncspot passes these to cursive's parser, which takes
+`black`/`red`/`green`/`yellow`/`blue`/`magenta`/`cyan`/`white`, each
+optionally prefixed `light ` or `dark `, plus `default`, plus hex
+(`#rrggbb`). **`gray` is not in that list** — `gray` and `light gray` fail
+to parse and silently fall back to a default with only a log warning
+(`ncspot -d <logfile>` to see it), which is how an earlier version of this
+theme ended up with a statusbar that was never actually silver. This theme
+uses hex throughout to avoid that. Note that this package builds ncspot
+against the ncurses backend, which quantizes hex to the xterm-256 palette
+rather than emitting truecolor — greys land on the fine 24-step ramp, other
+colors snap to the 6×6×6 cube.
 
-Colors and format strings are config-only (see ncspot's own
-[theming docs](https://github.com/hrkfdn/ncspot/blob/main/doc/users.md#theming));
+See ncspot's own
+[user docs](https://github.com/hrkfdn/ncspot/blob/main/doc/users.md) and
 tweak freely. Restart the session (`:quit` inside ncspot, or
 `tmux kill-session -t ncspot` — the keepalive plugin respawns it) to pick up
 theme and `initial_screen` changes; `:reload` only covers keybindings and
 format strings.
+
+One gotcha if you edit the file: `statusbar_format` is a top-level key, so
+it has to stay *above* the `[track_format]` table. TOML assigns any bare key
+written after a table header to that table, and ncspot then silently never
+sees it.
 
 ## Known ncspot issues
 
