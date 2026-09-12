@@ -11,7 +11,12 @@ fi
 echo "==> Building ncspot-ncurses (OAuth-capable, v1.4.0+) from AUR"
 echo "    (the aarch64 'extra/ncspot' package predates Spotify's OAuth requirement)"
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-tmp="$(mktemp -d)"
+# Build on real disk, not /tmp: a Rust release build's target/ dir runs to
+# multiple GB, and /tmp is commonly a small RAM-backed tmpfs that a build
+# this size can fill outright (seen in the wild: linker SIGBUS from a full
+# tmpfs, indistinguishable at a glance from a real compiler bug).
+tmp="$(mktemp -d -p /var/tmp)"
+trap 'rm -rf "$tmp"' EXIT
 git clone https://aur.archlinux.org/ncspot-ncurses.git "$tmp/ncspot-ncurses"
 patch_file="$repo_dir/patches/mpris-emit-capabilities-changed.patch"
 if [[ -f "$patch_file" ]]; then
@@ -33,8 +38,7 @@ sed -i \
   -e '/^\s*pandoc README\.md/d' \
   -e '/ncspot\.1/d' \
   "$tmp/ncspot-ncurses/PKGBUILD"
-(cd "$tmp/ncspot-ncurses" && makepkg -si --ignorearch)
-rm -rf "$tmp"
+(cd "$tmp/ncspot-ncurses" && makepkg -si --ignorearch --noconfirm)
 
 echo "==> Enabling Omarchy's built-in Media (MPRIS) bar widget"
 omarchy plugin enable omarchy.media
