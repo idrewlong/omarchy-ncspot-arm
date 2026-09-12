@@ -105,7 +105,13 @@ recessed grey groove, and a silver transport bar across the bottom with
 black text. The playlist columns are remapped to WMP's Now Playing order —
 Title / Artist / Length — and `use_nerdfont = true` turns ncspot's bracket
 text (`[R]`/`[Z]`/`[U]`) into real icon glyphs and gives saved tracks a
-heart.
+heart. `library_tabs` drops the two least WMP-era tabs (Podcasts, Browse)
+down to four, and `hide_display_names = true` strips the "whose library did
+this come from" username ncspot otherwise prints next to shared tracks.
+
+`notify = true` is also set — without it, the `[notification_format]` table
+below is dead config, since ncspot defaults notifications off and never
+reads `title`/`body` unless this is on.
 
 **What it can't get you.** ncspot is an ncurses TUI: there is no skin
 chrome, no window bezel, and **no visualizer** — ncspot has no

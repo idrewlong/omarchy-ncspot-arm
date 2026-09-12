@@ -32,6 +32,18 @@ initial_screen = "library"
 # the pane with a soft blur.
 cover_max_scale = 2
 
+# WMP's Media Library was one flat list, not six tabs. Podcasts and Browse
+# are the two least WMP-era tabs here, so drop them and keep the rest in
+# WMP's own priority order.
+library_tabs = ["tracks", "albums", "artists", "playlists"]
+
+# WMP's playlist view never showed whose library a track came from.
+hide_display_names = true
+
+# The [notification_format] table below was dead config until this: notify
+# defaults to false, so nothing used title/body unless this is set.
+notify = true
+
 # The bottom row is ncspot's transport bar, and it is genuinely interactive:
 # left-click toggles play/pause, left-click on the seek bar directly above
 # it jumps to that position, and the scroll wheel over the [nn%] readout
