@@ -23,6 +23,16 @@ if [[ -f "$patch_file" ]]; then
     /^}/i\  patch -Np1 -i "'"$patch_file"'"
   }' "$tmp/ncspot-ncurses/PKGBUILD"
 fi
+
+# pandoc-cli (only used to generate the man page) isn't built for aarch64 on
+# Arch Linux ARM -- not in the official repos, not in the AUR -- so drop it
+# rather than fail the whole build over a man page.
+echo "==> Skipping man page generation (pandoc-cli has no aarch64 build)"
+sed -i \
+  -e "s/'pandoc-cli'//" \
+  -e '/^\s*pandoc README\.md/d' \
+  -e '/ncspot\.1/d' \
+  "$tmp/ncspot-ncurses/PKGBUILD"
 (cd "$tmp/ncspot-ncurses" && makepkg -si --ignorearch)
 rm -rf "$tmp"
 

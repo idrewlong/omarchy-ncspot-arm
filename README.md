@@ -52,15 +52,20 @@ omarchy plugin enable omarchy.media
 omarchy plugin add https://github.com/idrewlong/omarchy-ncspot-arm --enable
 ```
 
-Then log in once, interactively (OAuth, opens your browser — no password
-typed anywhere):
+Then log in once. `omarchy-ncspot-login` attaches the keepalive session and
+opens the OAuth URL in your browser for you (no copy-pasting a URL that
+wraps across several terminal lines):
 
 ```sh
-tmux new -s ncspot ncspot
+./omarchy-ncspot-login
 ```
 
-Detach with `Ctrl+b` then `d`. From then on the keepalive plugin restarts the
-session if it ever dies, and the bar widget reflects whatever's playing.
+Approve the login in your browser, then detach with `Ctrl+b` then `d`. From
+then on the keepalive plugin restarts the session if it ever dies, and the
+bar widget reflects whatever's playing.
+
+(Equivalent by hand: `tmux new -s ncspot ncspot`, then read the OAuth URL
+out of the pane yourself.)
 
 ## Browsing / queueing music
 

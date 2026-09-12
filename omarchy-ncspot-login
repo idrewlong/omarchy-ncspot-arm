@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# One-shot helper for the interactive Spotify OAuth login ncspot needs once.
+# Attaches (creating if needed) the keepalive plugin's tmux session, watches
+# for ncspot's "Browse to: <url>" login prompt, and opens it in the default
+# browser automatically -- no copy-pasting a wrapped URL out of a TUI pane.
+set -euo pipefail
+
+session=ncspot
+
+open_url() {
+  local url="$1"
+  echo "==> Opening Spotify login in your browser:"
+  echo "    $url"
+  if command -v uwsm-app >/dev/null 2>&1; then
+    setsid uwsm-app -- xdg-open "$url" >/dev/null 2>&1 &
+  elif command -v xdg-open >/dev/null 2>&1; then
+    setsid xdg-open "$url" >/dev/null 2>&1 &
+  else
+    echo "    (no xdg-open found -- open that URL yourself)" >&2
+  fi
+}
+
+# ncspot wraps the URL across several terminal-width lines with no separator
+# other than the wrap itself, terminated by a blank line. Stitch the "Browse
+# to:" paragraph back into one string before extracting the URL from it.
+extract_url() {
+  tmux capture-pane -t "$session" -p -S -200 2>/dev/null \
+    | awk '/Browse to:/{f=1} f{line=line $0; if ($0 == "") exit} END{print line}' \
+    | tr -d '[:space:]' \
+    | grep -oE 'https://accounts\.spotify\.com/authorize[^"'"'"']*' || true
+}
+
+if ! tmux has-session -t "$session" 2>/dev/null; then
+  echo "==> Starting ncspot in a detached tmux session"
+  tmux new-session -d -s "$session" ncspot
+fi
+
+echo "==> Waiting for the Spotify login prompt (up to 20s)..."
+url=""
+for _ in $(seq 1 40); do
+  url="$(extract_url)"
+  [[ -n "$url" ]] && break
+  sleep 0.5
+done
+
+if [[ -n "$url" ]]; then
+  open_url "$url"
+  echo "==> Complete the login in your browser, then come back here."
+else
+  echo "==> No login prompt found -- ncspot is probably already logged in."
+fi
+
+echo "==> Attaching to the ncspot session (Ctrl+b then d to detach)"
+exec tmux attach -t "$session"
