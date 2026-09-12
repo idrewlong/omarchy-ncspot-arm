@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# One-shot helper for the interactive Spotify OAuth logins spotify-player
+# needs once. Runs `spotify_player authenticate`, watches its output for each
+# "Browse to: <url>" prompt, and opens each one in the default browser.
+#
+# Why this is more than a convenience: with streaming enabled (the default,
+# and the whole point on aarch64) spotify-player runs *two* independent OAuth
+# flows back to back, under two different client IDs --
+#
+#   1. the Web API token   (ncspot's client ID; cached as <client_id>_token.json)
+#   2. the librespot session (Spotify's official client ID; cached as credentials.json)
+#
+# -- so Spotify demands two separate approvals, and the second URL only
+# appears after the first is done. A person watching the terminal will often
+# approve the first, see the app sit there, and assume it hung. This loops
+# until the process exits, opening each URL as it shows up.
+#
+# Unlike the ncspot equivalent, no tmux/capture-pane scraping is needed:
+# spotify_player prints each URL as a single line on stdout, so it can just
+# be piped. The ncspot helper has to stitch a visually wrapped URL back
+# together out of a tmux pane because ncspot prints it into its own TUI.
+set -euo pipefail
+
+session="spotify-player"
+log="$(mktemp -t spotify-player-login.XXXXXX)"
+trap 'rm -f "$log"' EXIT
+
+open_url() {
+  local url="$1"
+  echo "==> Opening Spotify login in your browser:"
+  echo "    $url"
+  if command -v uwsm-app >/dev/null 2>&1; then
+    setsid uwsm-app -- xdg-open "$url" >/dev/null 2>&1 &
+  elif command -v xdg-open >/dev/null 2>&1; then
+    setsid xdg-open "$url" >/dev/null 2>&1 &
+  else
+    echo "    (no xdg-open found -- open that URL yourself)" >&2
+  fi
+}
+
+# The tmux keepalive session holds the librespot device open, and a second
+# copy of spotify-player would fight it for the OAuth callback port (8989)
+# and register a duplicate Spotify Connect device. Stop it for the duration.
+if tmux has-session -t "$session" 2>/dev/null; then
+  echo "==> Stopping the keepalive session while authenticating"
+  tmux kill-session -t "$session"
+fi
+
+echo "==> Authenticating (expect TWO browser approvals: Web API, then librespot)"
+spotify_player authenticate >"$log" 2>&1 &
+auth_pid=$!
+
+seen=""
+while kill -0 "$auth_pid" 2>/dev/null; do
+  # grep -o keeps this robust against the surrounding "Browse to: " prose and
+  # against the two URLs differing in query-parameter order, which they do.
+  while read -r url; do
+    case " $seen " in *" $url "*) continue ;; esac
+    seen="$seen $url"
+    open_url "$url"
+  done < <(grep -oE 'https://accounts\.spotify\.com/authorize[^ ]*' "$log" 2>/dev/null || true)
+  sleep 0.5
+done
+
+wait "$auth_pid" && rc=0 || rc=$?
+cat "$log"
+if [[ $rc -ne 0 ]]; then
+  echo "==> Authentication failed (exit $rc)." >&2
+  exit "$rc"
+fi
+
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/spotify-player"
+echo "==> Cached credentials in $cache:"
+ls -1 "$cache" 2>/dev/null | sed 's/^/    /'
+
+echo "==> Starting the keepalive session"
+tmux new-session -d -s "$session" spotify_player
+echo "==> Done. Click the music-note bar widget to open the TUI."

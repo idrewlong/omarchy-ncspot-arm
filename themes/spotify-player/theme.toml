@@ -1,0 +1,120 @@
+# Y2K Windows Media Player (Luna era) for spotify-player.
+#
+# The sibling of themes/y2k-media-player.toml, which does the same job for
+# ncspot. Same palette, more surface area to put it on: spotify-player draws
+# a persistent playback window with real album art and a real frequency-bar
+# visualizer, so the two things the ncspot theme has to apologise for --
+# "no visualizer", "cover art only on a screen that hides everything else"
+# -- are actually present here.
+#
+# Drop-in location: ~/.config/spotify-player/theme.toml
+# Then set `theme = "y2k-media-player"` in ~/.config/spotify-player/app.toml
+# (the app.toml next to this file already does).
+#
+# Colors: spotify-player is ratatui/crossterm, not ncurses. It emits real
+# 24-bit SGR (\e[38;2;R;G;Bm), so these hex values arrive at the terminal
+# exactly as written -- no snapping to the xterm-256 cube the way the
+# ncurses ncspot build has to. That's why this file can use WMP's actual
+# Luna hex instead of values nudged toward palette entries.
+# Verify with: tmux capture-pane -t spotify-player -p -e | grep -o '38;2;[0-9;]*'
+#
+# Every field below is optional; anything omitted falls back to
+# spotify-player's own default, which is a terminal-palette look.
+
+[[themes]]
+name = "y2k-media-player"
+
+# The palette is the fallback any component that isn't styled below resolves
+# against. Set it so even unstyled corners of the UI stay in the Luna story
+# rather than inheriting whatever the foot theme happens to be today.
+[themes.palette]
+background = "#000000"      # WMP's Now Playing pane was black
+foreground = "#d4d4d4"      # silver list text
+black = "#000000"
+red = "#c00000"
+green = "#00c000"
+yellow = "#ffd700"
+blue = "#316ac5"            # Luna selection blue
+magenta = "#a35cc5"
+cyan = "#3f8fef"
+white = "#d4d4d4"
+bright_black = "#6e6e6e"    # the recessed-groove grey
+bright_red = "#ff5c5c"
+bright_green = "#00e000"    # LCD lime, for "this is playing"
+bright_yellow = "#ffe680"
+bright_blue = "#6badf7"     # Luna light blue, titles and chrome accents
+bright_magenta = "#c98cdd"
+bright_cyan = "#8fc7ff"
+bright_white = "#ffffff"
+
+[themes.component_style]
+# Pane titles and page headers: Luna light blue, the color XP used for
+# active window captions and group-box labels.
+block_title = { fg = "#6badf7", modifiers = ["Bold"] }
+page_desc = { fg = "#6badf7", modifiers = ["Bold"] }
+
+# Borders are the window chrome. Flat mid-grey, no color -- Win32 frames
+# were grey regardless of what was inside them. Set border_type = "Plain"
+# in app.toml to keep them square; "Rounded" is a decade too late.
+border = { fg = "#6e6e6e" }
+
+# --- the playback window (the part ncspot cannot do at all) ---
+# This is WMP's Now Playing readout, so it's styled like a stereo component
+# display: lime track name, silver artist, blue album.
+playback_status = { fg = "#6badf7", modifiers = ["Bold"] }
+playback_track = { fg = "#00e000", modifiers = ["Bold"] }
+playback_artists = { fg = "#d4d4d4" }
+playback_album = { fg = "#6badf7" }
+playback_genres = { fg = "#6e6e6e", modifiers = ["Italic"] }
+playback_metadata = { fg = "#8a8a8a" }
+
+# The seek bar: Luna blue fill in a recessed grey groove. Same two colors
+# the ncspot theme uses for statusbar_progress / statusbar_progress_bg, so
+# the two players look like the same product.
+# `unfilled` only takes effect when progress_bar_type = "Line"; with the
+# default "Rectangle" the groove comes from this style's bg.
+playback_progress_bar = { fg = "#3f8fef", bg = "#6e6e6e" }
+playback_progress_bar_unfilled = { bg = "#6e6e6e" }
+
+# --- lists and tables ---
+# Selection: white on Luna blue, the XP listview selection exactly. This has
+# to name fg *and* bg explicitly, because spotify-player's default for
+# `selection` is modifiers = ["Reversed", "Bold"] -- inheriting that would
+# invert whatever colors the row already had and lose the blue entirely.
+selection = { fg = "#ffffff", bg = "#316ac5", modifiers = ["Bold"] }
+
+# Column headers drawn as a Win32 listview header: black text on the same
+# silver as ncspot's transport bar. This is the single most WMP-looking
+# thing in the whole UI, and it costs one line.
+table_header = { fg = "#000000", bg = "#c0c0c0" }
+
+# The currently-playing row in a tracklist: LCD lime, matching ncspot's
+# `playing`. There's no left-gutter arrow here either -- like ncspot,
+# spotify-player marks the playing row by color alone.
+current_playing = { fg = "#00e000", modifiers = ["Bold"] }
+
+# Alternating/secondary rows, one step down from silver so the banding is
+# visible without turning into a second color.
+secondary_row = { fg = "#a8a8a8" }
+playlist_desc = { fg = "#6e6e6e", modifiers = ["Dim"] }
+
+# The ♥ on saved tracks (liked_icon in app.toml).
+like = { fg = "#ff5c5c" }
+
+# --- lyrics page (no ncspot equivalent at all) ---
+lyrics_played = { fg = "#6e6e6e", modifiers = ["Dim"] }
+lyrics_playing = { fg = "#00e000", modifiers = ["Bold"] }
+
+# --- the visualizer ---
+# spotify-player draws 64 log-scale frequency bands, bass on the left, and
+# colors each bar by amplitude: `low` for quiet, `mid` for medium, `high`
+# for loud. That is a VU meter, so it gets VU meter colors --
+# green / amber / red -- which is also exactly what WMP's "Bars and Waves"
+# visualization looked like. The upstream default is blue/green/red.
+#
+# This only renders while audio is streaming through spotify-player's own
+# librespot device. Playing to an external Spotify Connect device hides the
+# visualizer area entirely -- that's upstream behavior, not a broken theme.
+# It also needs enable_audio_visualization = true in app.toml; it defaults
+# to false.
+visualization = { low = "#00c000", mid = "#ffd700", high = "#ff3b30" }

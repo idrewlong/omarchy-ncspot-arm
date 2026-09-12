@@ -1,0 +1,123 @@
+# Y2K Windows Media Player (Luna era) for spotify-player -- app settings.
+#
+# Companion to theme.toml in this directory. theme.toml carries the colors;
+# this file carries the layout, icons and format strings that make the
+# colors land on a Windows Media Player shape rather than a generic TUI.
+#
+# Drop-in location: ~/.config/spotify-player/app.toml
+#
+# This is deliberately a *partial* config. spotify-player fills in its own
+# default for every key you leave out, so only the keys that actually differ
+# from stock are listed -- which also means this file won't silently pin an
+# option to a stale default the next time upstream changes one.
+#
+# ORDERING MATTERS, and it bites here exactly the way it bites in
+# themes/y2k-media-player.toml: every bare top-level key has to appear
+# *above* the first table header. TOML assigns a bare key written after
+# `[layout]` to the layout table, and spotify-player's config struct then
+# ignores it without a word -- no parse error, no log line, just a default.
+# An earlier draft of this file put cover_img_width, playback_format and
+# enable_audio_visualization after [layout.library] and spent a while
+# looking like the visualizer was broken. Verify the config the app actually
+# loaded, don't trust the file:
+#   grep -o 'enable_audio_visualization: [a-z]*' ~/.cache/spotify-player/*.log
+
+# ---------------------------------------------------------------------------
+# Top-level keys. Everything bare goes here, before any [table].
+# ---------------------------------------------------------------------------
+
+# Selects the theme defined in theme.toml.
+theme = "y2k-media-player"
+
+# Cover art size, in terminal cells. `cover_img_width` is ROWS and
+# `cover_img_length` is COLUMNS -- yes, that way round. Leaving length at 0
+# lets spotify-player derive the column count from the terminal's real cell
+# aspect ratio (queried with CSI 16 t; foot answers 26x12 px here), which is
+# what keeps a square cover square instead of stretched.
+cover_img_width = 7
+cover_img_length = 0
+enable_cover_image_cache = true
+
+# The visualizer. Off by default upstream. This is the feature ncspot has no
+# equivalent for at all, and WMP's defining screen element, so it's on.
+# Colors come from theme.toml's `visualization` (green/amber/red VU ramp).
+#
+# It draws only while audio is streaming through spotify-player's own
+# librespot device -- the render is gated on is_local_streaming_active(), so
+# handing playback to another Spotify Connect device makes the whole
+# visualizer area disappear. That's upstream behavior, not a broken theme.
+enable_audio_visualization = true
+
+# Win32 frames were square. "Rounded" is the wrong decade.
+border_type = "Plain"
+# A solid filled bar in a groove, i.e. WMP's seek slider, rather than the
+# thin "Line" style.
+progress_bar_type = "Rectangle"
+progress_bar_position = "Bottom"
+
+play_icon = "▶"
+pause_icon = "▌▌"
+liked_icon = "♥"
+explicit_icon = "(E)"
+
+# Mirrors themes/y2k-media-player.toml's statusbar_format ("%artists ― %title")
+# as closely as the different placeholder set allows. Album gets its own
+# line here because there's room for it -- the ncspot theme drops album
+# precisely because it only had one line to spend.
+playback_format = """
+{status}  {track} {liked}
+{artists}  ―  {album}
+{metadata}"""
+
+playback_metadata_fields = ["repeat", "shuffle", "volume", "device"]
+
+# Notifications are on by default here (unlike ncspot, where the equivalent
+# [notification_format] table is dead config until notify = true). Stated
+# anyway so the behavior is visible in the file rather than implied.
+enable_notify = true
+
+# Must stay true for Omarchy's omarchy.media bar widget to see this player
+# at all. It is already the Linux default; it is pinned here because the
+# entire point of this repo is that bar-widget integration, and a silently
+# flipped default would look like the widget broke.
+#
+# Unlike ncspot, spotify-player needs no patch for this: it reports the MPRIS
+# Can* capabilities as true from startup, so the widget's play/pause/next/prev
+# buttons are live immediately.
+enable_media_control = true
+
+# Local playback through the bundled librespot. Without this,
+# spotify-player is only a remote control for some *other* Spotify device --
+# which on aarch64 is exactly the thing that doesn't exist.
+enable_streaming = "Always"
+
+# ---------------------------------------------------------------------------
+# Tables. Nothing bare may follow this line.
+# ---------------------------------------------------------------------------
+
+# The whole reason this config exists. Unlike ncspot, spotify-player draws a
+# persistent playback panel on *every* page: cover art, track text, seek bar
+# and the visualizer, all still visible while you browse a playlist. WMP put
+# Now Playing above the list, so: Top.
+#
+# Height has to pay for cover art + three text lines + the seek bar + two
+# border rows. The stock 6 leaves no room for the visualizer at all.
+[layout]
+playback_window_position = "Top"
+playback_window_height = 9
+
+[layout.library]
+playlist_percent = 40
+album_percent = 40
+
+# Same two-line split as the ncspot theme's [notification_format]: title on
+# top, artist underneath.
+[notify_format]
+summary = "{track}"
+body = "{artists}"
+
+[device]
+name = "spotify-player"
+device_type = "speaker"
+volume = 70
+bitrate = 320

@@ -34,6 +34,74 @@ This repo:
 6. Ships an optional [Y2K Windows Media Player theme](#themes) for the TUI
    itself — colors and format strings are all ncspot already supports, no
    patch needed.
+7. Offers [spotify-player as an alternative backend](#choosing-a-player) for
+   the same slot, with its own Y2K theme — no compile, no patch, real Sixel
+   album art and a working visualizer.
+
+## Choosing a player
+
+Two TUIs can fill this repo's slot. Both are librespot-based, both handle
+Spotify's OAuth requirement, both publish MPRIS so `omarchy.media` works.
+
+```sh
+./install.sh                          # ncspot (default)
+./install.sh --player spotify-player  # spotify-player
+```
+
+The choice is recorded in `~/.config/omarchy-ncspot-arm/player`, which the
+keepalive service and the bar-widget button both read on every use. It's
+kept outside the plugin checkout so `omarchy plugin update` can't clobber
+it, and it defaults to `ncspot` when absent — so an install that predates
+this option keeps behaving exactly as it did.
+
+|                          | ncspot                                | spotify-player                        |
+| ------------------------ | ------------------------------------- | ------------------------------------- |
+| aarch64 install          | AUR build from source (~10 min)       | `pacman -S spotify-player`, prebuilt  |
+| MPRIS bar-widget controls| needs [our patch](patches)            | correct as shipped                    |
+| Album art in the TUI     | `F8`, a full-screen page              | always visible, beside the track text |
+| Visualizer               | none — no such feature exists         | 64-band frequency bars                |
+| Lyrics                   | none                                  | dedicated page                        |
+| Theme surface            | 19 fixed colors, xterm-256 quantized  | 18-color palette + 20 component styles, true 24-bit |
+
+**Why ncspot is still the default.** It's what this repo has been shipping,
+it works, and switching backends silently would be a worse answer than
+offering the choice. Its one genuine edge is that it doesn't probe the
+terminal for a graphics protocol, so it behaves identically whether the tmux
+session was created attached or detached — see the
+[headless caveat](#the-headless-caveat) below, which is the one rough edge
+on the spotify-player path.
+
+**Why spotify-player is worth switching to.** On aarch64 it costs one
+`pacman -S` instead of a from-source Rust build, and it needs no patch at
+all: `busctl` shows every MPRIS capability already `true` at startup.
+
+```
+$ busctl --user get-property org.mpris.MediaPlayer2.spotify_player \
+    /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player CanPause
+b true
+$ omarchy-shell media playPause
+ok
+```
+
+That `ok` is the whole reason [`patches/`](patches) exists for ncspot — an
+unpatched ncspot answers `unhandled` there even mid-track.
+
+**Don't run both at once.** They're two Spotify Connect devices on one
+account and two MPRIS players competing for the bar widget, and the doubled
+Web API traffic is enough on its own to earn a `429 Too Many Requests` from
+Spotify (observed here: `retry_after_secs=15`, which stalls play/pause for
+both). The session names differ (`ncspot` / `spotify-player`) so nothing
+collides at the tmux level — that's a convenience for switching, not an
+invitation to run a pair.
+
+**What about spotify-tui / spotatui?** `spotify-tui` is
+[archived by its author](https://github.com/Rigellute/spotify-tui/issues/1156)
+and doesn't work with current Spotify auth. Its maintained successor
+[`spotatui`](https://github.com/LargeModGames/spotatui) is a real project
+with MPRIS and an FFT visualizer, but it's AUR-only — a from-source Rust
+build, i.e. exactly the cost this repo exists to avoid — and its docs claim
+no terminal graphics protocol at all, so no album art. spotify-player wins
+both axes, so spotatui isn't packaged here.
 
 ## Requirements
 
@@ -74,6 +142,36 @@ bar widget reflects whatever's playing.
 (Equivalent by hand: `tmux new -s ncspot ncspot`, then read the OAuth URL
 out of the pane yourself.)
 
+### Installing the spotify-player path instead
+
+```sh
+./install.sh --player spotify-player
+./omarchy-spotify-player-login
+```
+
+No AUR, no patch, no compile — Arch Linux ARM ships a real aarch64 binary in
+`[extra]`, built with the features that matter here. Check them yourself:
+
+```
+$ spotify_player features
+  ✓ streaming   ✓ media-control   ✓ image   ✓ sixel   ✓ notify   ✓ daemon
+```
+
+Expect **two** browser approvals, not one. With streaming on, spotify-player
+runs two independent OAuth flows under two different client IDs — the Web
+API token (ncspot's client ID, cached as `<client_id>_token.json`) and the
+librespot session (Spotify's own client ID, cached as `credentials.json`).
+Spotify demands a separate approval for each, and the second URL only
+appears after the first finishes, so a person watching the terminal will
+often approve one, see it sit there, and assume it hung.
+`omarchy-spotify-player-login` loops until the process exits and opens each
+URL as it appears. Confirm both landed:
+
+```
+$ ls ~/.cache/spotify-player/
+credentials.json  d420a117a32841c2b3474932e49fb54b_token.json  audio  image
+```
+
 ## Browsing / queueing music
 
 `ncspot` is a full TUI — reattach any time to search/browse/queue, either by
@@ -89,7 +187,23 @@ clip the bottom of ncspot's UI — that's exactly where the statusbar's
 title/artist line lives, so a stray second attachment makes it look like
 ncspot forgot how to show what's playing.
 
+On the spotify-player path the session is named after the binary
+(`tmux attach -d -t spotify-player`), and prefer the bar-widget icon to a
+hand-rolled `attach`: the button also handles the
+[headless caveat](#the-headless-caveat), which a bare `attach` does not.
+
 ## Themes
+
+Two Y2K Windows Media Player themes ship here, one per player. They share a
+palette on purpose — the same Luna blue, the same LCD lime, the same silver
+— so the two backends look like the same product.
+
+- [`themes/y2k-media-player.toml`](themes/y2k-media-player.toml) — ncspot
+- [`themes/spotify-player/`](themes/spotify-player) — spotify-player
+  (`theme.toml` + `app.toml`; `install.sh --player spotify-player` copies
+  both into place and keeps any existing file as `.bak`)
+
+### ncspot
 
 [`themes/y2k-media-player.toml`](themes/y2k-media-player.toml) is a
 config.toml drop-in for an early-2000s Windows Media Player look:
@@ -164,6 +278,120 @@ One gotcha if you edit the file: `statusbar_format` is a top-level key, so
 it has to stay *above* the `[track_format]` table. TOML assigns any bare key
 written after a table header to that table, and ncspot then silently never
 sees it.
+
+### spotify-player
+
+[`themes/spotify-player/`](themes/spotify-player) is the same look with more
+to put it on. `theme.toml` carries the colors, `app.toml` the layout and
+format strings; both go in `~/.config/spotify-player/`.
+
+**What it gets you that the ncspot theme can't.** A persistent Now Playing
+panel across the top of *every* page — cover art, track text and seek bar
+all still visible while you browse a playlist — a real
+green→amber→red VU-meter visualizer under it, and a lyrics page. WMP's
+column headers come back as black-on-silver `table_header`, which is one
+line of config and the single most Win32-looking thing in the UI.
+
+**The colors are exact here.** spotify-player is ratatui/crossterm, so it
+emits real 24-bit SGR rather than snapping to the xterm-256 cube the way the
+ncurses ncspot build has to. You can read the theme straight off the wire:
+
+```
+$ tmux capture-pane -t spotify-player -p -e | grep -o '38;2;[0-9;]*' | sort -u
+38;2;0;224;0      # #00e000 LCD lime  -> the playing track
+38;2;107;173;247  # #6badf7 Luna blue -> block titles, album
+38;2;212;212;212  # #d4d4d4 silver    -> list text
+38;2;63;143;239   # #3f8fef           -> seek bar fill, on a #6e6e6e groove
+```
+
+**The visualizer is real, and it's really your colors.** It draws 64
+log-scale frequency bands, colored by amplitude between the theme's
+`low`/`mid`/`high`. Captured mid-track, the bar cells come back as
+`38;2;195;209;0`, `38;2;255;179;10`, `38;2;255;136;24` — interpolations
+along this theme's `#00c000 → #ffd700 → #ff3b30` ramp, not upstream's
+blue→green→red default. It renders only while audio is streaming through
+spotify-player's own librespot device; the render is gated on
+`is_local_streaming_active()`, so handing playback to another Spotify
+Connect device makes the whole area vanish. That's upstream behavior.
+
+**Same TOML gotcha, worse blast radius.** Every bare top-level key has to
+sit *above* the first `[table]` header, exactly as with the ncspot theme —
+and spotify-player's config struct ignores misplaced keys without even a log
+warning. An earlier draft of `app.toml` put `cover_img_width`,
+`playback_format` and `enable_audio_visualization` after `[layout.library]`
+and spent a while looking like the visualizer was broken. Don't trust the
+file; read back what the app actually loaded:
+
+```sh
+grep -o 'enable_audio_visualization: [a-z]*' ~/.cache/spotify-player/*.log
+```
+
+### The headless caveat
+
+This is the one place the spotify-player path is genuinely rougher than
+ncspot, and it comes from how it renders album art.
+
+Album art works — verifiably. Captured off the raw terminal stream in
+`foot`, both bare and through `tmux`, spotify-player emits a real Sixel
+image: DCS header `ESC P 9;1;0 q "1;1;180;182`, a 180×182px raster with its
+own color registers, ~127 KB of payload. `tmux` 3.7 is built with Sixel
+support and passes `foot`'s capability through — `tmux display -p
+'#{client_termfeatures}'` lists `sixel`, and DA1 inside tmux answers
+`ESC[?1;2;4c`, where the `4` is Sixel.
+
+The catch: `ratatui-image` picks a protocol **exactly once, at startup**, by
+querying the terminal over stdio (`Picker::from_query_stdio` in
+`src/ui/mod.rs`). There is no config option and no env var to force it
+afterwards. A tmux session created *detached* — which is exactly what a
+keepalive service does — has no attached client to answer that query, so the
+probe fails and the process is stuck on half-block art for its whole life:
+
+```
+$ tmux new-session -d -s spotify-player spotify_player
+$ grep -o 'Image protocol: [A-Za-z]*' ~/.cache/spotify-player/*.log
+Image protocol: Halfblocks
+```
+
+So [`Service.qml`](Service.qml) tags any session it had to create blind with
+`@headless`, and [`OpenPlayerWidget.qml`](OpenPlayerWidget.qml) recreates
+that session with a client attached when you open the TUI, which makes the
+probe succeed:
+
+```
+$ tmux show-option -qv -t spotify-player @headless
+1
+# ... click the bar widget ...
+$ grep -o 'Image protocol: [A-Za-z]*' ~/.cache/spotify-player/*.log
+Image protocol: Sixel
+```
+
+Recreating restarts the process, so it's skipped whenever something is
+actually playing — clicking "open" must never cut off music. The cost of
+that rule is that if you start music before ever opening the TUI, you keep
+blocky art until the next restart. ncspot has no equivalent problem: it
+blits Sixel from its own code and never probes.
+
+### Album art in the bar widget
+
+Worth knowing before anyone writes QML for it: Omarchy's `omarchy.media`
+widget **already** shows cover art. Its popup card binds `trackArtUrl`
+straight into an `Image` (see
+`/usr/share/omarchy/shell/plugins/services/media/BarWidget.qml`, the
+`Image { source: root.activePlayer.trackArtUrl }` block), with a music-note
+glyph as the fallback when it's empty.
+
+Both players feed it. spotify-player publishes a real CDN URL:
+
+```
+$ busctl --user --json=short get-property org.mpris.MediaPlayer2.spotify_player \
+    /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player Metadata
+mpris:artUrl = 'https://i.scdn.co/image/ab67616d0000b273ffe7f1d3a6c317cf21cbbc83'
+```
+
+and ncspot fills the same key from `cover_url()` (`src/mpris.rs:166`) once a
+track is loaded — it reads empty only when nothing is queued. So there's
+nothing to build here: no custom cover-art panel, no IPC bridge to ncspot's
+socket. The bar widget already does it.
 
 ## Known ncspot issues
 
