@@ -1,13 +1,20 @@
-# Y2K Windows Media Player vibe: black "Now Playing" pane, green LCD-style
-# track text, and a silvery statusbar with a Luna-blue selection highlight.
-initial_screen = "cover"
+# Y2K Windows Media Player vibe: black background, green LCD-style track
+# text, and a silvery statusbar with a Luna-blue selection highlight.
+#
+# initial_screen deliberately isn't "cover": that view shows the *least*
+# text (no title/artist visible at all outside the statusbar), and terminal
+# image protocols vary in how cleanly they composite over/around surrounding
+# text -- exactly the wrong tradeoff when title/artist visibility is the
+# actual goal. Land on the library instead; press F8 any time to peek at
+# cover art on purpose.
+initial_screen = "library"
 statusbar_format = "♪ %artists - %title"
 # ncspot already draws live shuffle/repeat/volume state on the right side of
 # the statusbar -- it's just bracket text ([R]/[Z]) unless this is on, which
 # swaps in real icon glyphs (repeat-once/repeat-all/shuffle) for the WMP-era
 # button feel. They're real, always-current toggle indicators already wired
-# to lowercase z (shuffle) and r (repeat), not decoration -- there was just
-# nothing to show until you'd used either.
+# to Z (shuffle) and R (repeat), not decoration -- there was just nothing to
+# show one until you'd used either.
 use_nerdfont = true
 
 [track_format]

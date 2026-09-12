@@ -93,13 +93,19 @@ ncspot forgot how to show what's playing.
 
 [`themes/y2k-media-player.toml`](themes/y2k-media-player.toml) is a
 config.toml drop-in for an early-2000s Windows Media Player look: black
-"Now Playing" pane (`initial_screen = "cover"`, and the `cover` feature this
-repo already builds with renders real album art in the terminal), a
-Luna-blue selection highlight, green LCD-style track text, and
-`use_nerdfont = true` so ncspot's already-live shuffle/repeat/volume status
-(bound to `z`/`r`, on the right of the statusbar) draws as real icon glyphs
-instead of bracket text — genuine current-state indicators, not decoration,
-they just don't show anything until you've used shuffle or repeat once.
+background, a Luna-blue selection highlight, green LCD-style track text,
+and `use_nerdfont = true` so ncspot's already-live shuffle/repeat/volume
+status (bound to `Z`/`R`, on the right of the statusbar) draws as real icon
+glyphs instead of bracket text — genuine current-state indicators, not
+decoration, they just don't show anything until you've used shuffle or
+repeat once.
+
+It deliberately opens on the library (`initial_screen = "library"`) rather
+than `cover`: this repo's build does support rendering real album art in
+the terminal, but that view shows the *least* text — no title/artist
+visible at all outside the statusbar — which is exactly the wrong tradeoff
+when title/artist visibility is the actual goal. Press `F8` any time to
+peek at cover art on purpose.
 
 ```sh
 cp themes/y2k-media-player.toml ~/.config/ncspot/config.toml
