@@ -27,6 +27,10 @@ This repo:
 4. Patches a real upstream `ncspot` bug that leaves those bar-widget controls
    permanently disabled (see [Known ncspot issues](#known-ncspot-issues)
    below).
+5. Adds one small bar-widget of its own — a music-note icon next to the media
+   widget — since `omarchy.media` is a generic MPRIS control surface with no
+   way to know ncspot's "window" is a detached `tmux` session. Click it to
+   open the TUI back up.
 
 ## Requirements
 
