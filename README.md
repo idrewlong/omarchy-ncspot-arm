@@ -24,6 +24,9 @@ This repo:
 3. Reuses Omarchy's existing first-party `omarchy.media` bar widget for the
    UI (now-playing, play/pause/skip, volume) — no custom widget needed, since
    it's already a generic MPRIS aggregator.
+4. Patches a real upstream `ncspot` bug that leaves those bar-widget controls
+   permanently disabled (see [Known ncspot issues](#known-ncspot-issues)
+   below).
 
 ## Requirements
 
@@ -66,6 +69,41 @@ session if it ever dies, and the bar widget reflects whatever's playing.
 ```sh
 tmux attach -t ncspot
 ```
+
+## Known ncspot issues
+
+**The bar widget's play/pause/next/prev buttons never enable themselves.**
+ncspot's MPRIS server only emits `PropertiesChanged` for `PlaybackStatus`,
+`Metadata`, `Volume`, and seek position — never for `CanGoNext`,
+`CanGoPrevious`, `CanPlay`, `CanPause`, `CanSeek`, or `CanControl`. Those
+start out `false` (nothing queued yet) and MPRIS clients that cache
+capabilities instead of polling — including Quickshell's `Mpris` service,
+which backs `omarchy.media` — never learn they became `true` once a track
+loads. Confirmed against upstream `src/mpris.rs` (`ncspot` v1.4.0): the
+`can_go_next`/`can_pause`/etc. getters are correct live, ncspot just never
+tells anyone they changed.
+
+`install.sh` patches this (see [`patches/`](patches)) by re-emitting all six
+capability signals whenever playback status or the current track changes.
+Verified end to end: without the patch, `omarchy-shell media playPause`
+reports `unhandled` even while a track is actively playing; with it, a
+`dbus-monitor` capture shows each `Can*` property firing its own
+`PropertiesChanged` signal the moment the queue changes.
+
+**ncspot's default keybindings don't match the usual media-player
+convention.** `Space` queues the selected track/playlist, not
+play/pause — that's `Shift+P`. If you want the familiar scheme, add to
+`~/.config/ncspot/config.toml`:
+
+```toml
+[keybindings]
+"Space" = "playpause"
+"n" = "next"
+"p" = "previous"
+```
+
+(Run `:reload` inside `ncspot`, or restart the session, to pick up config
+changes.)
 
 ## License
 

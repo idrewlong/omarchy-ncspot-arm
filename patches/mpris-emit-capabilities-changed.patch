@@ -1,0 +1,35 @@
+--- a/src/mpris.rs	2026-09-12 14:34:55.140868575 -0500
++++ b/src/mpris.rs	2026-09-12 14:35:16.470825089 -0500
+@@ -539,6 +539,19 @@
+             match rx.next().await {
+                 Some(MprisCommand::EmitPlaybackStatus) => {
+                     player_iface.playback_status_changed(ctx).await?;
++                    // ncspot never signals these on their own (see the
++                    // omarchy-ncspot-arm README), so MPRIS clients that cache
++                    // capabilities instead of polling -- e.g. Quickshell's
++                    // Mpris service, which backs Omarchy's media bar widget --
++                    // get stuck with whatever was true at startup (usually all
++                    // false, since nothing is queued yet). Re-emit them
++                    // wherever playback state or the current track can change.
++                    player_iface.can_go_next_changed(ctx).await?;
++                    player_iface.can_go_previous_changed(ctx).await?;
++                    player_iface.can_play_changed(ctx).await?;
++                    player_iface.can_pause_changed(ctx).await?;
++                    player_iface.can_seek_changed(ctx).await?;
++                    player_iface.can_control_changed(ctx).await?;
+                 }
+                 Some(MprisCommand::EmitVolumeStatus) => {
+                     info!("sending MPRIS volume update signal");
+@@ -546,6 +559,12 @@
+                 }
+                 Some(MprisCommand::EmitMetadataStatus) => {
+                     player_iface.metadata_changed(ctx).await?;
++                    player_iface.can_go_next_changed(ctx).await?;
++                    player_iface.can_go_previous_changed(ctx).await?;
++                    player_iface.can_play_changed(ctx).await?;
++                    player_iface.can_pause_changed(ctx).await?;
++                    player_iface.can_seek_changed(ctx).await?;
++                    player_iface.can_control_changed(ctx).await?;
+                 }
+                 Some(MprisCommand::EmitSeekedStatus(pos)) => {
+                     info!("sending MPRIS seeked signal");

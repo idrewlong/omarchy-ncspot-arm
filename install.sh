@@ -10,16 +10,32 @@ fi
 
 echo "==> Building ncspot-ncurses (OAuth-capable, v1.4.0+) from AUR"
 echo "    (the aarch64 'extra/ncspot' package predates Spotify's OAuth requirement)"
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tmp="$(mktemp -d)"
 git clone https://aur.archlinux.org/ncspot-ncurses.git "$tmp/ncspot-ncurses"
+patch_file="$repo_dir/patches/mpris-emit-capabilities-changed.patch"
+if [[ -f "$patch_file" ]]; then
+  echo "==> Patching ncspot's MPRIS server so the media bar widget's controls work"
+  echo "    (upstream never signals CanPlay/CanPause/CanGoNext/CanGoPrevious"
+  echo "     changes, so MPRIS clients that cache them -- like Quickshell's"
+  echo "     Mpris service -- see play/pause/skip permanently disabled)"
+  sed -i '/^prepare() {/,/^}/{
+    /^}/i\  patch -Np1 -i "'"$patch_file"'"
+  }' "$tmp/ncspot-ncurses/PKGBUILD"
+fi
 (cd "$tmp/ncspot-ncurses" && makepkg -si --ignorearch)
 rm -rf "$tmp"
 
 echo "==> Enabling Omarchy's built-in Media (MPRIS) bar widget"
 omarchy plugin enable omarchy.media
 
-echo "==> Installing this keepalive plugin"
-omarchy plugin add "$(git -C "$(dirname "${BASH_SOURCE[0]}")" remote get-url origin 2>/dev/null || echo "https://github.com/idrewlong/omarchy-ncspot-arm")" --enable
+plugin_id="$(jq -r '.id' "$repo_dir/manifest.json")"
+if omarchy plugin list --json | jq -e --arg id "$plugin_id" 'any(.[]; .id == $id)' >/dev/null; then
+  echo "==> Keepalive plugin already installed, skipping"
+else
+  echo "==> Installing this keepalive plugin"
+  omarchy plugin add "$(git -C "$repo_dir" remote get-url origin 2>/dev/null || echo "https://github.com/idrewlong/omarchy-ncspot-arm")" --enable
+fi
 
 cat <<'EOF'
 
