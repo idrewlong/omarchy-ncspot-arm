@@ -30,7 +30,9 @@ This repo:
 5. Adds one small bar-widget of its own — a music-note icon next to the media
    widget — since `omarchy.media` is a generic MPRIS control surface with no
    way to know ncspot's "window" is a detached `tmux` session. Click it to
-   open the TUI back up.
+   open the TUI back up. What each of the two widgets responds to is written
+   down in [The bar widgets](#the-bar-widgets); `omarchy.media`'s next/prev
+   are gestures with nothing on screen to hint at them.
 6. Ships an optional [Y2K Windows Media Player theme](#themes) for the TUI
    itself — colors and format strings are all ncspot already supports, no
    patch needed.
@@ -53,6 +55,13 @@ keepalive service and the bar-widget button both read on every use. It's
 kept outside the plugin checkout so `omarchy plugin update` can't clobber
 it, and it defaults to `ncspot` when absent — so an install that predates
 this option keeps behaving exactly as it did.
+
+Re-running `install.sh` with the other `--player` also stops the previous
+player's `tmux` session. Nothing else ever would: the keepalive service only
+looks at the session belonging to the *current* choice, so before this the
+documented way to switch left the old backend running forever — two
+librespot devices on one account, which is the state the next paragraph
+warns about, reached by following the instructions.
 
 |                          | ncspot                                | spotify-player                        |
 | ------------------------ | ------------------------------------- | ------------------------------------- |
@@ -107,7 +116,13 @@ both axes, so spotatui isn't packaged here.
 
 - Omarchy 4.x (Quattro) on aarch64
 - Spotify **Premium** (required for librespot-based playback)
-- `tmux`
+- `tmux`, `jq`, and the `omarchy` CLI
+
+`install.sh` checks for those three before it does anything. A missing `tmux`
+in particular used to be invisible: the build succeeds, the plugin
+registers, and then the keepalive service and the bar-widget button both
+silently do nothing, because everything they do is a `tmux` invocation whose
+failure they swallow.
 
 ## Install
 
@@ -115,13 +130,32 @@ both axes, so spotatui isn't packaged here.
 ./install.sh
 ```
 
-This builds `ncspot-ncurses` from the AUR, enables `omarchy.media`, and
-registers this plugin with Omarchy. Or do it by hand:
+This builds `ncspot-ncurses` from the AUR, drops the
+[Y2K theme](#themes) into `~/.config/ncspot/config.toml`, enables
+`omarchy.media`, and registers this plugin with Omarchy. Both `--player` paths
+install their theme the same way now, and both keep whatever config was
+already there as a `.bak` first — and if a `.bak` already exists they say so
+and leave it alone rather than overwriting the backup of the backup.
+
+It registers the plugin **from this checkout**, not from `origin`.
+`omarchy plugin add` runs `git clone -- <source> <stage>`, and git clones a
+local path as readily as a URL, so what omarchy-shell loads is the code
+sitting here rather than whatever is currently on GitHub. It also used to
+break outright on an SSH remote: `git remote get-url origin` hands back
+`git@github.com:...`, and `omarchy-plugin-add` clones with
+`GIT_TERMINAL_PROMPT=0` and `ssh -oBatchMode=yes`, so a passphrase-protected
+key fails with nothing to answer the prompt on. git only clones committed
+refs, so `install.sh` says so when the working tree has changes that won't
+make the trip.
+
+Or do it by hand:
 
 ```sh
 git clone https://aur.archlinux.org/ncspot-ncurses.git
 cd ncspot-ncurses
-makepkg -si --ignorearch   # ignorearch: PKGBUILD says x86_64, but it's pure Rust and builds fine on aarch64
+makepkg -si --ignorearch --nocheck   # ignorearch: PKGBUILD says x86_64, but it's pure Rust and builds fine on aarch64
+                                      # nocheck: skip check(), a second cargo build with its own feature
+                                      # set whose failure would otherwise kill an install this repo doesn't need
 
 omarchy plugin enable omarchy.media
 omarchy plugin add https://github.com/idrewlong/omarchy-ncspot-arm --enable
@@ -172,6 +206,18 @@ $ ls ~/.cache/spotify-player/
 credentials.json  d420a117a32841c2b3474932e49fb54b_token.json  audio  image
 ```
 
+Two things that script has to do that aren't obvious. It stops the keepalive
+session first, because a second `spotify_player` would fight the running one
+for the OAuth callback port (8989) and register a duplicate Connect device —
+and then it has to *park a do-nothing session under the same name* for the
+duration, because [`Service.qml`](Service.qml) re-checks every 15 seconds and
+only asks whether a session of that name exists. Killing the session alone
+would just have the keepalive respawn the player into the middle of the
+login. And when it restarts the real session at the end it tags it
+`@headless`, exactly as the keepalive service does, or the first thing you'd
+see after a successful login is permanently blocky album art — see
+[the headless caveat](#the-headless-caveat).
+
 ## Browsing / queueing music
 
 `ncspot` is a full TUI — reattach any time to search/browse/queue, either by
@@ -192,6 +238,148 @@ On the spotify-player path the session is named after the binary
 hand-rolled `attach`: the button also handles the
 [headless caveat](#the-headless-caveat), which a bare `attach` does not.
 
+Everything in this repo that names a session now writes it as `=ncspot`
+rather than `ncspot`. A bare tmux target matches exactly, then as a *prefix*,
+then as an fnmatch — so an unrelated session of your own called
+`ncspot-scratch` satisfies `has-session -t ncspot`, and the `=` is what stops
+a `kill-session` from finding it:
+
+```
+$ tmux new-session -d -s ncspot-scratch 'sleep 60'
+$ tmux has-session -t ncspot-scratch && echo matched    # the real target
+matched
+$ tmux has-session -t ncspot-scratc && echo matched     # a prefix also matches
+matched
+$ tmux has-session -t "=ncspot-scratc" || echo rejected
+can't find session: ncspot-scratc
+rejected
+```
+
+Quote it if you type it yourself. Omarchy's default shell is `zsh`, where a
+bare leading `=` is an equals-expansion — `=ncspot-scratc` becomes "the full
+path of the command `ncspot-scratc`", and you get `ncspot-scratc not found`
+from the shell before tmux ever sees the argument. The scripts here always
+write `"=$s"`.
+
+The prefix also only works on the session-target commands, which is not
+obvious, and is why the `set-option` calls sitting right next to it stay bare:
+`has-session`, `kill-session` and `attach-session` take `=`, while
+`set-option`, `show-option` and `capture-pane` answer
+`no such session: =ncspot` (checked against tmux 3.7).
+
+### The window says "Media Player", the session is still called "ncspot"
+
+`tmux`'s `status-left` defaults to echoing the session name, so the TUI
+window's top-left used to read `ncspot` or `spotify-player` — i.e. it
+announced which backend you happened to install, which is the one detail
+everything else here works to make invisible. Every session this plugin
+creates now gets a cosmetic relabel instead, black on the same `#c0c0c0`
+silver both Y2K themes use for their transport bars:
+
+```sh
+tmux set-option -t "$s" status-left-length 20
+tmux set-option -t "$s" status-left "#[fg=#000000,bg=#c0c0c0,bold] Media Player #[default] "
+```
+
+`status-left-length` has to go with it: tmux's default is 10, which clips the
+label to `Media Pla`.
+
+The session *name* is deliberately untouched. `install.sh`,
+[`Service.qml`](Service.qml), [`OpenPlayerWidget.qml`](OpenPlayerWidget.qml)
+and both login scripts all address the session by name, and the `@headless`
+flag behind the [headless caveat](#the-headless-caveat) is a session option
+keyed to it — so `tmux attach -d -t ncspot` still works exactly as documented
+above, and a rename would have quietly broken five lookups to fix one label.
+
+This is tmux's chrome, which is a different thing from ncspot's own in-app
+statusbar (`statusbar_format` in
+[`themes/y2k-media-player.toml`](themes/y2k-media-player.toml), the silver bar
+across the bottom of the pane). The two are independent.
+
+It's applied once, at session creation, in each of the four places that create
+one — the keepalive service, the bar-widget button's create-if-missing
+fallback, and both login scripts — so if you set your own `status-left` on the
+session afterwards it stays yours (and a session you rolled by hand with
+`tmux new -s ncspot ncspot` never gets it). The flip side is that a session
+predating this keeps the old label until it's recreated:
+
+```sh
+tmux kill-session -t ncspot   # the keepalive plugin respawns it within 15s
+```
+
+## The bar widgets
+
+Two widgets sit in the bar and they are not the same thing. Which one does
+what is worth reading once, because between them they own every control this
+setup has and only one of them looks like a button.
+
+**`omarchy.media`** is Omarchy's own, and generic: it aggregates every MPRIS
+player on the system. It is what shows now-playing and what drives transport.
+Inline in the bar it draws exactly two things — a play/pause *state* glyph
+and the scrolling title — and every control is a gesture on that glyph, with
+nothing on screen to advertise any of them. From
+`/usr/share/omarchy/shell/plugins/services/media/BarWidget.qml`:
+
+| gesture      | action                        |
+| ------------ | ----------------------------- |
+| left click   | play/pause                    |
+| middle click | next track                    |
+| right click  | open the popup card           |
+| scroll up    | previous track                |
+| scroll down  | next track                    |
+
+The right-click popup is the only place visible buttons exist: prev /
+play-pause / next, the album art, title / artist / album, and — when more
+than one MPRIS player is running — a list to pick which one the widget
+follows.
+
+One more thing in that file worth knowing before you conclude the install
+failed: `visible: hasMedia`, where `hasMedia` needs a track title or artist.
+Until something has been loaded the widget is not dimmed, it is **absent**.
+A fresh login with nothing queued shows no media widget at all. Queue a
+track and it appears.
+
+**The music-note icon** (`󰝚`) is this repo's own widget,
+[`OpenPlayerWidget.qml`](OpenPlayerWidget.qml), and it has exactly one job:
+open the TUI. **Left click**, and only left click — middle and right are
+deliberately inert, because right-click means "context menu" everywhere else
+on the bar, `omarchy.media` right next door included, and opening a terminal
+is a surprising answer to it. So there is one gesture here, not five.
+
+It is always visible, including when `omarchy.media` isn't — which makes it
+the thing to click when nothing is playing yet and the bar looks empty. If
+opening fails (no `tmux`, a player binary that won't start), the terminal now
+stays open with the reason in it; it used to flash and vanish, which looks
+exactly like a bar icon that does nothing.
+
+### The gap between the two icons
+
+There is a few pixels of daylight between the play/pause glyph and the
+music note, and it can't be closed from inside this repo. It isn't
+inter-widget spacing — the bar's module list is `spacing: 0`
+(`plugins/bar/Bar.qml`, the `horizontalModuleList` component), and a hidden
+module contributes `implicitWidth: 0`. The whitespace is padding each widget
+reserves inside its own slot:
+
+- `omarchy.media` declares
+  `implicitWidth: hasMedia ? row.implicitWidth + Style.space(14) : 0`, and the
+  row inside it is centered — so half of that 14px (at the default spacing
+  scale) sits to the right of the glyph.
+- this repo's icon uses `BarIconButton`, whose slot is `Style.bar.iconSlot`
+  (27px) around a `Style.bar.iconCanvas` (16px) glyph, i.e. ~5px each side.
+  That is the same slot every other Omarchy bar icon uses, and shrinking it
+  here would put this one icon out of rhythm with the rest of the bar.
+
+The larger share is `omarchy.media`'s, in a system-owned file that an Omarchy
+update overwrites, and `omarchy plugin validate`'s manifest schema has no key
+for widget spacing, grouping or ordering hints — there is no plugin API to
+influence another widget's layout. Editing that file in place is also not the
+pattern here: [`patches/`](patches) patches ncspot's *source* through a real
+patch file applied at build time, which survives updates; a live edit to
+`/usr/share/omarchy/...` survives nothing. If you want it tighter today,
+`omarchy plugin clone omarchy.media` makes a user-owned copy you can edit,
+at the cost of freezing it at today's version.
+
 ## Themes
 
 Two Y2K Windows Media Player themes ship here, one per player. They share a
@@ -200,13 +388,19 @@ palette on purpose — the same Luna blue, the same LCD lime, the same silver
 
 - [`themes/y2k-media-player.toml`](themes/y2k-media-player.toml) — ncspot
 - [`themes/spotify-player/`](themes/spotify-player) — spotify-player
-  (`theme.toml` + `app.toml`; `install.sh --player spotify-player` copies
-  both into place and keeps any existing file as `.bak`)
+  (`theme.toml` + `app.toml`)
+
+`install.sh` copies whichever backend's theme file(s) apply into place
+automatically, and keeps any existing file it would overwrite as `.bak`
+(only on the first run that actually differs — re-running `install.sh`
+doesn't clobber that backup with the theme's own file).
 
 ### ncspot
 
 [`themes/y2k-media-player.toml`](themes/y2k-media-player.toml) is a
-config.toml drop-in for an early-2000s Windows Media Player look:
+config.toml drop-in for an early-2000s Windows Media Player look.
+`install.sh` installs it automatically; to apply it by hand (or reapply it
+after editing `config.toml` yourself):
 
 ```sh
 cp themes/y2k-media-player.toml ~/.config/ncspot/config.toml
@@ -392,6 +586,32 @@ and ncspot fills the same key from `cover_url()` (`src/mpris.rs:166`) once a
 track is loaded — it reads empty only when nothing is queued. So there's
 nothing to build here: no custom cover-art panel, no IPC bridge to ncspot's
 socket. The bar widget already does it.
+
+## Things that look broken and aren't
+
+Everything here is explained in full somewhere above. This is the index,
+because each one is a case where the correct behavior and a failed install
+look identical from the bar.
+
+| What you see | What it is |
+| ------------ | ---------- |
+| No media widget in the bar at all | `omarchy.media` sets `visible: hasMedia` and hides itself until a track has a title or artist. Queue something. [details](#the-bar-widgets) |
+| A play/pause glyph and nothing else — no next/prev | They exist, as gestures: middle-click for next, scroll for prev/next, right-click for the popup with real buttons. [details](#the-bar-widgets) |
+| The popup's play/pause/skip buttons are greyed out (ncspot) | Unpatched ncspot never signals its MPRIS capabilities. This is what [`patches/`](patches) fixes; `install.sh` applies it. [details](#known-ncspot-issues) |
+| ncspot opens on a track list, no album art anywhere | Deliberate: `initial_screen = "library"`, because the cover page hides title and artist. Press `F8` for cover art. [details](#ncspot) |
+| ncspot's shuffle/repeat glyphs are missing from the transport bar | They're live state, and ncspot draws an empty string when both are off. Lowercase `z` and `r` — uppercase isn't bound. [details](#ncspot) |
+| ncspot's bottom title/artist line disappeared | A second `tmux` client is attached and tmux clamped the session to the smaller one. Attach with `-d`. [details](#browsing--queueing-music) |
+| spotify-player's login hangs after you approve it | There are **two** approvals, and the second URL only appears after the first finishes. [details](#installing-the-spotify-player-path-instead) |
+| spotify-player's album art is blocky | Its graphics-protocol probe needs an attached terminal at startup. Click the music-note icon while nothing is playing. [details](#the-headless-caveat) |
+| The `tmux` window is labeled "Media Player", not the player's name | Cosmetic `status-left` override; the session is still named `ncspot` / `spotify-player`. [details](#the-window-says-media-player-the-session-is-still-called-ncspot) |
+| A gap between the play/pause glyph and the music-note icon | Padding inside `omarchy.media`'s own slot, in a system-owned file with no plugin API to reach it. [details](#the-gap-between-the-two-icons) |
+
+One case that really is a failure, and now says so: `omarchy-ncspot-login` and
+`omarchy-spotify-player-login` both refuse to run if their binary isn't
+installed. They used to start a `tmux` session around a command that exited
+immediately, find no login prompt, report "probably already logged in", and
+then fail to attach to a session that no longer existed — three misleading
+messages for one missing package.
 
 ## Known ncspot issues
 

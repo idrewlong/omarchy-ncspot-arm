@@ -7,6 +7,15 @@ set -euo pipefail
 
 session=ncspot
 
+# Without this, the tmux session below is created around a command that exits
+# immediately, no login prompt ever appears, and the script reports "probably
+# already logged in" before failing to attach to a session that no longer
+# exists -- three misleading messages for one missing package.
+if ! command -v ncspot >/dev/null 2>&1; then
+  echo "ncspot is not installed -- run ./install.sh first." >&2
+  exit 1
+fi
+
 open_url() {
   local url="$1"
   echo "==> Opening Spotify login in your browser:"
@@ -23,16 +32,34 @@ open_url() {
 # ncspot wraps the URL across several terminal-width lines with no separator
 # other than the wrap itself, terminated by a blank line. Stitch the "Browse
 # to:" paragraph back into one string before extracting the URL from it.
+#
+# The character class is a positive list of the characters a Spotify authorize
+# URL is actually made of, rather than "anything that isn't a quote". The
+# whitespace is already gone by this point, so a negated class happily swallows
+# whatever the TUI drew immediately after the URL -- a box-drawing border, say --
+# straight onto the end of it, and hands the browser a 404.
 extract_url() {
   tmux capture-pane -t "$session" -p -S -200 2>/dev/null \
     | awk '/Browse to:/{f=1} f{line=line $0; if ($0 == "") exit} END{print line}' \
     | tr -d '[:space:]' \
-    | grep -oE 'https://accounts\.spotify\.com/authorize[^"'"'"']*' || true
+    | grep -oE 'https://accounts\.spotify\.com/authorize[A-Za-z0-9._~:/?&=%+-]*' || true
 }
 
-if ! tmux has-session -t "$session" 2>/dev/null; then
+# "=" is tmux's exact-match target prefix: without it a target also matches as
+# a prefix, so an unrelated "ncspot-scratch" session would pass this check and
+# the login would scrape the wrong pane. It works on has-session, kill-session
+# and attach-session; set-option and capture-pane reject it outright ("no such
+# session: =x" on tmux 3.7), which is why those stay bare.
+if ! tmux has-session -t "=$session" 2>/dev/null; then
   echo "==> Starting ncspot in a detached tmux session"
   tmux new-session -d -s "$session" ncspot
+  # Cosmetic only: tmux's status-left defaults to echoing the session name, so
+  # the window's top-left would otherwise read "ncspot" -- the one detail this
+  # repo tries to make invisible. Same two options Service.qml sets on the
+  # sessions it creates; see the comment there. The session name is unchanged,
+  # and this is tmux chrome, not ncspot's own statusbar_format.
+  tmux set-option -t "$session" status-left-length 20
+  tmux set-option -t "$session" status-left "#[fg=#000000,bg=#c0c0c0,bold] Media Player #[default] "
 fi
 
 echo "==> Waiting for the Spotify login prompt (up to 20s)..."
@@ -55,4 +82,4 @@ echo "==> Attaching to the ncspot session (Ctrl+b then d to detach)"
 # session to the smallest attached client's size, so a smaller terminal left
 # open elsewhere (e.g. the bar-widget button's window) would otherwise
 # silently shrink this one, clipping the tab bar/statusbar.
-exec tmux attach -d -t "$session"
+exec tmux attach -d -t "=$session"

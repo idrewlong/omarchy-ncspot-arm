@@ -22,8 +22,24 @@
 set -euo pipefail
 
 session="spotify-player"
+
+if ! command -v spotify_player >/dev/null 2>&1; then
+  echo "spotify_player is not installed -- run ./install.sh --player spotify-player first." >&2
+  exit 1
+fi
+
 log="$(mktemp -t spotify-player-login.XXXXXX)"
-trap 'rm -f "$log"' EXIT
+# Set while the placeholder session below is holding the session name. On any
+# exit path -- success, authentication failure, Ctrl-C -- the placeholder has
+# to go, or the keepalive service sees an occupied name and never respawns the
+# real player.
+parked=""
+cleanup() {
+  rm -f "$log"
+  [[ -n "$parked" ]] && tmux kill-session -t "=$parked" 2>/dev/null
+  return 0
+}
+trap cleanup EXIT
 
 open_url() {
   local url="$1"
@@ -41,10 +57,25 @@ open_url() {
 # The tmux keepalive session holds the librespot device open, and a second
 # copy of spotify-player would fight it for the OAuth callback port (8989)
 # and register a duplicate Spotify Connect device. Stop it for the duration.
-if tmux has-session -t "$session" 2>/dev/null; then
+# "=" is tmux's exact-match target prefix, and it matters most here: without it
+# a target also matches as a prefix, and these are kills. It works on
+# has-session, kill-session and attach-session; set-option rejects it outright
+# ("no such session: =x" on tmux 3.7), which is why the set-options below stay
+# bare.
+if tmux has-session -t "=$session" 2>/dev/null; then
   echo "==> Stopping the keepalive session while authenticating"
-  tmux kill-session -t "$session"
+  tmux kill-session -t "=$session"
 fi
+
+# Killing it isn't enough on its own: Service.qml re-checks every 15s and only
+# looks at whether a session of this name exists, so it would respawn
+# spotify_player in the middle of the login and reintroduce exactly the
+# contention the kill above was for. Park a do-nothing session under the name
+# for the duration. If this script dies without cleaning up, the `sleep`
+# eventually ends, the session goes with it, and the keepalive respawns the
+# real player on its next tick.
+tmux new-session -d -s "$session" 'sleep 900'
+parked="$session"
 
 echo "==> Authenticating (expect TWO browser approvals: Web API, then librespot)"
 spotify_player authenticate >"$log" 2>&1 &
@@ -54,11 +85,15 @@ seen=""
 while kill -0 "$auth_pid" 2>/dev/null; do
   # grep -o keeps this robust against the surrounding "Browse to: " prose and
   # against the two URLs differing in query-parameter order, which they do.
+  # The character class is a positive list of what these URLs are made of,
+  # rather than "anything that isn't a space": the negated version also captured
+  # a trailing carriage return, or a comma if the prose ever put one after the
+  # URL, and handed that to the browser as part of the address.
   while read -r url; do
     case " $seen " in *" $url "*) continue ;; esac
     seen="$seen $url"
     open_url "$url"
-  done < <(grep -oE 'https://accounts\.spotify\.com/authorize[^ ]*' "$log" 2>/dev/null || true)
+  done < <(grep -oE 'https://accounts\.spotify\.com/authorize[A-Za-z0-9._~:/?&=%+-]*' "$log" 2>/dev/null || true)
   sleep 0.5
 done
 
@@ -71,8 +106,29 @@ fi
 
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/spotify-player"
 echo "==> Cached credentials in $cache:"
-ls -1 "$cache" 2>/dev/null | sed 's/^/    /'
+# `ls | sed` under `set -o pipefail` fails the whole pipeline when the cache
+# directory is missing, and `set -e` would then abort the script one line
+# before it restarts the keepalive session -- i.e. a cosmetic listing would
+# leave the player down. Guard it.
+if [[ -d "$cache" ]]; then
+  ls -1 "$cache" | sed 's/^/    /'
+else
+  echo "    (nothing there -- authentication wrote no cache)"
+fi
 
 echo "==> Starting the keepalive session"
+tmux kill-session -t "=$session" 2>/dev/null || true
+parked=""
 tmux new-session -d -s "$session" spotify_player
+# Created detached, so the graphics-protocol probe had nobody to answer it:
+# tag it the same way Service.qml tags the sessions it creates blind, so the
+# bar-widget button knows to recreate it with a client attached and get real
+# Sixel album art instead of half-blocks. Without this tag the flag is absent,
+# the button never recreates, and the art stays blocky for the session's whole
+# life -- see the README's "headless caveat".
+tmux set-option -t "$session" @headless 1
+# Cosmetic, and identical to the ncspot path so the two backends read the same
+# in the window's top-left. tmux chrome only; the session name is unchanged.
+tmux set-option -t "$session" status-left-length 20
+tmux set-option -t "$session" status-left "#[fg=#000000,bg=#c0c0c0,bold] Media Player #[default] "
 echo "==> Done. Click the music-note bar widget to open the TUI."
