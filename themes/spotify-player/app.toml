@@ -71,10 +71,13 @@ playback_format = """
 
 playback_metadata_fields = ["repeat", "shuffle", "volume", "device"]
 
-# Notifications are on by default here (unlike ncspot, where the equivalent
-# [notification_format] table is dead config until notify = true). Stated
-# anyway so the behavior is visible in the file rather than implied.
-enable_notify = true
+# Track-change notifications come from this repo's spotify-player-event hook
+# instead of the built-in ones, which wait on a delayed Web API refresh and
+# arrive 1-3s after the music changes. The hook fires the moment librespot
+# starts a track. It's installed with the plugin, hence the plugin-dir path;
+# spotify-player runs the command directly (no shell), so bash expands $HOME.
+enable_notify = false
+player_event_hook_command = { command = "bash", args = ["-c", "exec \"${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/io.github.idrewlong.ncspot-keepalive/bin/spotify-player-event\" \"$@\"", "spotify-player-event"] }
 
 # Must stay true for Omarchy's omarchy.media bar widget to see this player
 # at all. It is already the Linux default; it is pinned here because the
@@ -86,10 +89,12 @@ enable_notify = true
 # buttons are live immediately.
 enable_media_control = true
 
-# Local playback through the bundled librespot. Without this,
-# spotify-player is only a remote control for some *other* Spotify device --
-# which on aarch64 is exactly the thing that doesn't exist.
-enable_streaming = "Always"
+# Only the background daemon (`spotify_player -d`, kept alive by
+# Service.qml) plays audio through librespot. The TUI opened from the bar is
+# a remote for that daemon, so the two never register as two Spotify
+# Connect devices. Cost: the visualizer above only draws in the instance
+# that streams, so it doesn't show in the TUI.
+enable_streaming = "DaemonOnly"
 
 # ---------------------------------------------------------------------------
 # Tables. Nothing bare may follow this line.
@@ -109,12 +114,6 @@ playback_window_height = 9
 [layout.library]
 playlist_percent = 40
 album_percent = 40
-
-# Same two-line split as the ncspot theme's [notification_format]: title on
-# top, artist underneath.
-[notify_format]
-summary = "{track}"
-body = "{artists}"
 
 [device]
 name = "spotify-player"

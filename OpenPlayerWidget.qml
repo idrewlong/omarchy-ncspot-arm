@@ -1,12 +1,13 @@
 import QtQuick
+import Quickshell
+import Quickshell.Io
+import Quickshell.Services.Mpris
+import qs.Commons
 import qs.Ui
 
-// A small bar icon, separate from Omarchy's own omarchy.media widget, whose
-// only job is to open the Spotify TUI. omarchy.media is a generic MPRIS
-// aggregator with no idea the player's "window" is a detached tmux session,
-// so there's no way to get from "now playing" back to the actual player
-// without this: its own click handlers are already play/pause (left), next
-// (middle), and a controls popup (right).
+// A music icon for the bar. Hovering it shows a mini player (cover, track,
+// progress, shuffle / previous / play-pause / next / repeat); clicking it
+// opens the full TUI. Middle-click toggles playback, the wheel skips.
 BarWidget {
   id: root
   moduleName: "io.github.idrewlong.ncspot-keepalive"
@@ -14,78 +15,312 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  readonly property string spotifyTui: String(Qt.resolvedUrl("bin/spotify-tui")).replace(/^file:\/\//, "")
+
+  // The background player's own MPRIS entry -- not omarchy.media's "active
+  // player", which could be a browser tab.
+  readonly property var player: {
+    var list = Mpris.players ? Mpris.players.values : []
+    for (var i = 0; i < list.length; i++)
+      if (String(list[i].dbusName || "").indexOf("org.mpris.MediaPlayer2.spotify_player") === 0)
+        return list[i]
+    return null
+  }
+
+  // spotify-player-event writes the new track here the moment librespot
+  // starts it. MPRIS gets the same data 1-3s later (spotify-player waits on a
+  // delayed Web API refresh), so this wins whenever it's present.
+  property var now: null
+  FileView {
+    id: nowFile
+    path: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/omarchy-spotify/now.json"
+    watchChanges: true
+    printErrors: false
+    // text() is stale inside the change signal; reload and parse in onLoaded.
+    onFileChanged: reload()
+    onLoaded: {
+      try { root.now = JSON.parse(text()) } catch (e) { root.now = null }
+    }
+    onLoadFailed: root.now = null
+  }
+  readonly property bool useNow: player !== null && now !== null && now.title !== ""
+
+  readonly property string title: useNow ? now.title : (player ? (player.trackTitle || "") : "")
+  readonly property string artist: useNow ? now.artists : (player ? (player.trackArtist || "") : "")
+  readonly property string artUrl: useNow && now.cover
+    ? "file://" + now.cover
+    : (player && player.trackArtUrl ? player.trackArtUrl : "")
+
+  // Play/pause flips immediately on click; MPRIS confirms within ~1s.
+  property var playingOverride: null
+  readonly property bool isPlaying: playingOverride !== null ? playingOverride : (player ? player.isPlaying : false)
+  Connections {
+    target: root.player
+    ignoreUnknownSignals: true
+    function onIsPlayingChanged() { root.playingOverride = null }
+  }
+  Timer { id: overrideExpiry; interval: 2500; onTriggered: root.playingOverride = null }
+
+  function togglePlaying() {
+    if (!player) return
+    playingOverride = !isPlaying
+    overrideExpiry.restart()
+    player.togglePlaying()
+  }
+
+  // Shuffle/repeat: spotify-player's MPRIS server has neither, so they go
+  // through its CLI. State is read back with `get key playback`, which the
+  // daemon answers from memory -- no Web API request, no rate-limit cost.
+  property bool shuffle: false
+  property string repeatState: "off"   // off | context | track
+
+  Process {
+    id: stateProcess
+    command: ["spotify_player", "get", "key", "playback"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          var p = JSON.parse(text)
+          if (!p) return
+          root.shuffle = !!p.shuffle_state
+          root.repeatState = p.repeat_state || "off"
+        } catch (e) {}
+      }
+    }
+  }
+  Process { id: controlProcess }
+
+  function refreshState() {
+    if (player && !stateProcess.running) stateProcess.running = true
+  }
+
+  function runControl(action) {
+    controlProcess.command = ["spotify_player", "playback", action]
+    controlProcess.running = true
+    stateRefreshLater.restart()
+  }
+
+  function toggleShuffle() {
+    shuffle = !shuffle
+    runControl("shuffle")
+  }
+
+  function cycleRepeat() {
+    repeatState = repeatState === "off" ? "context" : repeatState === "context" ? "track" : "off"
+    runControl("repeat")
+  }
+  Timer { id: stateRefreshLater; interval: 1500; onTriggered: root.refreshState() }
+
+  // --- hover-open popup -------------------------------------------------
+
+  property bool popupOpen: false
+  function close() { popupOpen = false }
+
+  readonly property bool hovering: iconHover.hovered || popup.containsMouse
+  onHoveringChanged: {
+    if (hovering) {
+      closeTimer.stop()
+      if (!popupOpen) openTimer.restart()
+    } else {
+      openTimer.stop()
+      closeTimer.restart()
+    }
+  }
+  // A short open delay so sweeping the pointer across the bar doesn't flash
+  // the card; a longer close delay to cross the gap between bar and card.
+  Timer { id: openTimer; interval: 180; onTriggered: root.popupOpen = true }
+  Timer { id: closeTimer; interval: 350; onTriggered: root.popupOpen = false }
+
+  onPopupOpenChanged: if (popupOpen) refreshState()
+  Timer {
+    interval: 1000
+    repeat: true
+    running: root.popupOpen
+    onTriggered: {
+      // MprisPlayer.position only moves when asked to.
+      if (root.player) root.player.positionChanged()
+      if ((++tick % 3) === 0) root.refreshState()
+    }
+    property int tick: 0
+  }
+
+  HoverHandler { id: iconHover }
+
   BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
     text: "󰝚"
-    tooltipText: "Open Spotify TUI"
+    dimmed: !root.isPlaying
     onPressed: function(b) {
-      // Left button only. WidgetButton forwards middle and right clicks here
-      // too, and opening a terminal on a right-click is the wrong answer to a
-      // gesture that means "context menu" everywhere else on the bar --
-      // including on the omarchy.media widget sitting next to this one, where
-      // right-click opens its popup.
+      if (b === Qt.MiddleButton) { root.togglePlaying(); return }
       if (b !== Qt.LeftButton) return
+      root.popupOpen = false
+      root.openFullPlayer()
+    }
+    onWheelMoved: function(delta) {
+      if (!root.player) return
+      if (delta > 0) root.player.previous()
+      else root.player.next()
+    }
+  }
 
-      // --app-id=TUI.float gets Omarchy's default floating+centered+875x600
-      // treatment (see default/hypr/apps/system.lua) instead of whatever
-      // sliver a tiling layout has free -- both players need real rows to
-      // fit their panes without clipping the bottom line, and for
-      // spotify-player those rows are also what the cover art is drawn into.
-      //
-      // `attach -d` detaches any other client on the session first: tmux
-      // clamps a shared session to the *smallest* attached client's size, so
-      // a second, smaller terminal left open elsewhere would silently shrink
-      // this one back down.
-      //
-      // The @headless dance only applies to spotify-player, and it exists
-      // because of a hard constraint in how it renders album art:
-      // ratatui-image picks a graphics protocol exactly once, at startup,
-      // by querying the terminal over stdio (Picker::from_query_stdio in
-      // src/ui/mod.rs). A tmux session created detached -- which is what the
-      // keepalive service does -- has no attached client to answer that
-      // query, so the probe fails and the process is stuck on half-block art
-      // for its whole lifetime. There is no config option or env var to
-      // force the protocol after the fact.
-      //
-      // So the keepalive tags any session it creates blind with @headless,
-      // and opening the TUI recreates that session with a client attached,
-      // which makes the probe succeed (verified: the log line goes from
-      // "Image protocol: Halfblocks" to "Image protocol: Sixel").
-      // Recreating restarts the process, so it is skipped whenever something
-      // is actually playing -- clicking "open" must never cut off music.
-      // Worst case there you keep blocky art until the next restart.
-      root.bar.run("omarchy-launch-terminal --app-id=TUI.float bash -c '" +
-        "p=$(cat \"${XDG_CONFIG_HOME:-$HOME/.config}\"/omarchy-ncspot-arm/player 2>/dev/null || echo ncspot); " +
-        "case \"$p\" in spotify-player) s=spotify-player; c=spotify_player;; *) s=ncspot; c=ncspot;; esac; " +
-        "if [ \"$s\" = spotify-player ] && [ \"$(tmux show-option -qv -t \"$s\" @headless 2>/dev/null)\" = 1 ] && " +
-        "! busctl --user get-property org.mpris.MediaPlayer2.spotify_player /org/mpris/MediaPlayer2 " +
-        "org.mpris.MediaPlayer2.Player PlaybackStatus 2>/dev/null | grep -q Playing; then " +
-        // "=" forces an exact session-name match; without it tmux also matches
-        // a target as a prefix, and this one is a kill. It goes on
-        // kill-session and attach-session but not on show-option above, which
-        // rejects it outright ("no such session: =x" on tmux 3.7).
-        "tmux kill-session -t \"=$s\" 2>/dev/null; fi; " +
-        // The `tmux new` fallback is the path that has to create the session
-        // *attached* (that is the whole point of the @headless dance above),
-        // so the cosmetic status-left relabel rides along as a tmux command
-        // sequence rather than a follow-up command -- `tmux new` without -d
-        // blocks until the client detaches, so anything written after it
-        // would only run once the window was already closed. Same two options
-        // Service.qml sets at its own creation site; see the comment there
-        // for why the session name itself stays as-is.
-        //
-        // And a trailing failure branch, because this runs in a terminal that
-        // Omarchy closes the instant the command returns: without it, a broken
-        // tmux or a missing player binary makes the window flash open and
-        // vanish, which is indistinguishable from the bar icon doing nothing
-        // at all. Hold the window open long enough to read why.
-        "tmux attach -d -t \"=$s\" || tmux new -s \"$s\" \"$c\" " +
-        "\\; set-option -t \"$s\" status-left-length 20 " +
-        "\\; set-option -t \"$s\" status-left \"#[fg=#000000,bg=#c0c0c0,bold] Media Player #[default] \" " +
-        "|| { echo; echo Could not open the Spotify TUI: neither attaching nor starting " +
-        "tmux session $s running $c worked.; echo Press Enter to close.; read -r _; }'")
+  // Opens the TUI, or focuses it if already open. See bin/spotify-tui.
+  function openFullPlayer() {
+    Quickshell.execDetached([root.spotifyTui, "open"])
+  }
+
+  PopupCard {
+    id: popup
+    anchorItem: root
+    bar: root.bar
+    owner: root
+    open: root.popupOpen
+    triggerMode: "hover"
+    contentWidth: popup.fittedContentWidth(Style.space(300))
+    contentHeight: popup.fittedContentHeight(column.implicitHeight)
+
+    Column {
+      id: column
+      anchors.fill: parent
+      spacing: Style.space(10)
+
+      Row {
+        width: parent.width
+        spacing: Style.space(10)
+
+        BorderSurface {
+          width: Style.space(64)
+          height: Style.space(64)
+          radius: Style.spacing.labelGap
+          color: Style.normalFillFor(root.bar.foreground, Color.accent)
+          borderSpec: Border.controlSpec("normal", root.bar.foreground, Color.accent)
+
+          Image {
+            anchors.fill: parent
+            anchors.margins: Style.space(2)
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            source: root.artUrl
+            visible: source !== "" && status === Image.Ready
+          }
+
+          Text {
+            anchors.centerIn: parent
+            visible: root.artUrl === ""
+            text: "󰝚"
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.displayLarge
+          }
+        }
+
+        Column {
+          width: parent.width - Style.space(74)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(4)
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: root.title || (root.player ? "Nothing playing" : "Player not running")
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.subtitle
+            font.bold: true
+            elide: Text.ElideRight
+          }
+
+          Text {
+            width: parent.width
+            visible: text !== ""
+            textFormat: Text.PlainText
+            text: root.artist
+            color: Qt.darker(root.bar.foreground, 1.3)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            elide: Text.ElideRight
+          }
+        }
+      }
+
+      // Progress. Hidden while MPRIS still describes the previous track
+      // (its length would be wrong for the one the hook just announced).
+      Rectangle {
+        readonly property bool valid: root.player !== null && root.player.length > 0
+          && (!root.useNow || root.player.trackTitle === root.now.title)
+        width: parent.width
+        height: Style.space(3)
+        radius: height / 2
+        color: Qt.rgba(root.bar.foreground.r, root.bar.foreground.g, root.bar.foreground.b, 0.18)
+        opacity: valid ? 1 : 0
+
+        Rectangle {
+          height: parent.height
+          radius: parent.radius
+          color: Color.accent
+          width: parent.valid ? parent.width * Math.min(1, root.player.position / root.player.length) : 0
+          Behavior on width { NumberAnimation { duration: 900; easing.type: Easing.Linear } }
+        }
+      }
+
+      Row {
+        anchors.horizontalCenter: parent.horizontalCenter
+        spacing: Style.space(4)
+
+        Button {
+          iconText: root.shuffle ? "󰒟" : "󰒞"
+          selected: root.shuffle
+          foreground: root.bar.foreground
+          horizontalPadding: Style.spacing.controlPaddingX
+          verticalPadding: Style.spacing.controlPaddingY
+          enabled: root.player !== null
+          opacity: enabled ? (root.shuffle ? 1.0 : 0.55) : 0.25
+          onClicked: root.toggleShuffle()
+        }
+
+        Button {
+          iconText: "󰒮"
+          foreground: root.bar.foreground
+          horizontalPadding: Style.spacing.controlPaddingX
+          verticalPadding: Style.spacing.controlPaddingY
+          enabled: root.player !== null && root.player.canGoPrevious
+          opacity: enabled ? 1.0 : 0.4
+          onClicked: root.player.previous()
+        }
+
+        Button {
+          iconText: root.isPlaying ? "󰏤" : "󰐊"
+          foreground: root.bar.foreground
+          horizontalPadding: Style.spacing.panelGap
+          verticalPadding: Style.spacing.controlPaddingY
+          iconSize: Style.font.iconLarge
+          enabled: root.player !== null && (root.player.canTogglePlaying || root.player.canPlay || root.player.canPause)
+          opacity: enabled ? 1.0 : 0.4
+          onClicked: root.togglePlaying()
+        }
+
+        Button {
+          iconText: "󰒭"
+          foreground: root.bar.foreground
+          horizontalPadding: Style.spacing.controlPaddingX
+          verticalPadding: Style.spacing.controlPaddingY
+          enabled: root.player !== null && root.player.canGoNext
+          opacity: enabled ? 1.0 : 0.4
+          onClicked: root.player.next()
+        }
+
+        Button {
+          iconText: root.repeatState === "track" ? "󰑘" : "󰑖"
+          selected: root.repeatState !== "off"
+          foreground: root.bar.foreground
+          horizontalPadding: Style.spacing.controlPaddingX
+          verticalPadding: Style.spacing.controlPaddingY
+          enabled: root.player !== null
+          opacity: enabled ? (root.repeatState !== "off" ? 1.0 : 0.55) : 0.25
+          onClicked: root.cycleRepeat()
+        }
+      }
     }
   }
 }

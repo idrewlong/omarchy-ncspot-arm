@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "io.github.idrewlong.ncspot-keepalive",
-  "name": "ncspot Keepalive",
-  "version": "1.4.0",
+  "name": "Spotify",
+  "version": "2.0.0",
   "author": "idrewlong",
   "license": "MIT",
-  "description": "Keeps a Spotify TUI client session (ncspot or spotify-player, per ~/.config/omarchy-ncspot-arm/player) alive in the background via tmux, so Omarchy's built-in Media (MPRIS) bar widget can show now-playing and controls. Workaround for Spotify's official Linux client having no aarch64 build.",
+  "description": "Spotify on aarch64 Omarchy: keeps spotify-player running in the background and adds a music icon to the bar with a hover mini player (shuffle, previous, play/pause, next, repeat). Click it for the full TUI. Workaround for Spotify's official Linux client having no aarch64 build.",
   "kinds": [
     "service",
     "bar-widget"
@@ -15,10 +15,10 @@
     "barWidget": "OpenPlayerWidget.qml"
   },
   "barWidget": {
-    "displayName": "Open Spotify TUI",
-    "description": "Opens the configured Spotify TUI in a terminal, attaching the keepalive session",
+    "displayName": "Spotify",
+    "description": "Music icon with a hover mini player; click to open the full TUI",
     "category": "Media",
-    "defaultSection": "right",
+    "defaultSection": "center",
     "allowMultiple": false
   }
 }

@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# spotify-player's player_event_hook_command (themes/spotify-player/app.toml).
+#
+# Sends the now-playing notification, and records the track for the bar
+# widget's mini player, as soon as librespot starts a track.
+# spotify-player's built-in notification waits for a Web API refresh it only
+# makes after a hardcoded 1s sleep (and again 2s later), so it lands 1-3s after
+# the music has already changed.
+#
+# Triggers on "Playing", not "Changed": at a natural track end, Changed can
+# carry a different track id than the one that actually starts. Playing also
+# fires on every resume, so only announce an id we haven't announced last.
+#
+# spotify-player runs this synchronously and waits for its stdout to close, so
+# the work happens in a detached child with its output closed.
+set -euo pipefail
+
+[[ "${1:-}" == Playing && "${2:-}" == spotify:track:* ]] || exit 0
+id="${2#spotify:track:}"
+
+state="${XDG_RUNTIME_DIR:-/tmp}/omarchy-spotify"
+mkdir -p "$state"
+[[ "$(cat "$state/last-track" 2>/dev/null)" == "$id" ]] && exit 0
+printf '%s\n' "$id" > "$state/last-track"
+
+setsid bash -c '
+  id=$1 state=$2
+  PATH="$PATH:/usr/share/omarchy/bin"
+
+  # Track data comes from the public embed page rather than the Web API: one
+  # unauthenticated request, and no draw on spotify-player'"'"'s API quota (it
+  # shares a client id with ncspot and hits 429s easily). The page is
+  # undocumented, so fall back to the CLI (which does use the API) if it moves.
+  meta=$(curl -fs --max-time 2 "https://open.spotify.com/embed/track/$id" |
+    sed -n "s/.*<script id=\"__NEXT_DATA__\" type=\"application\/json\">\([^<]*\)<.*/\1/p" |
+    jq -c ".props.pageProps.state.data.entity |
+      {title: .name, artists: ([.artists[]?.name] | join(\", \")), cover: .visualIdentity.image[0].url}" 2>/dev/null)
+  if [[ -z "$(jq -r ".title // empty" <<<"$meta" 2>/dev/null)" ]]; then
+    meta=$(spotify_player get item track --id "$id" |
+      jq -c "{title: .name, artists: ([.artists[].name] | join(\", \")), cover: null}") || exit 0
+  fi
+  title=$(jq -r ".title" <<<"$meta")
+  artists=$(jq -r ".artists" <<<"$meta")
+
+  image=()
+  cover="$state/cover-$id.jpg"
+  url=$(jq -r ".cover // empty" <<<"$meta")
+  [[ -n "$url" ]] && curl -fs --max-time 2 -o "$cover" "$url" && image=(--image "$cover")
+
+  # Read by OpenPlayerWidget.qml, whose mini player would otherwise wait on
+  # MPRIS -- which has the same 1-3s lag as the built-in notification.
+  # Written in place, not renamed over: the widget watches this path.
+  jq -cn --arg id "$id" --arg title "$title" --arg artists "$artists" \
+    --arg cover "${image[1]:-}" "{\$id, \$title, \$artists, \$cover}" > "$state/now.json"
+
+  # -r replaces the previous track notification, so skipping quickly through
+  # tracks shows one updating notification instead of a stack.
+  rid=$(cat "$state/notify-id" 2>/dev/null || echo 0)
+  omarchy-notification-send --app-name spotify-player -g 󰓇 -r "$rid" -p \
+    "${image[@]}" "$title" "$artists" > "$state/notify-id.tmp" &&
+    mv "$state/notify-id.tmp" "$state/notify-id"
+  find "$state" -name "cover-*.jpg" ! -name "cover-$id.jpg" -delete
+' _ "$id" "$state" >/dev/null 2>&1 </dev/null &

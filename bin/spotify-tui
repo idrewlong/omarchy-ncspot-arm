@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# omarchy:summary=Spotify on aarch64 Omarchy: open the player, sign in/out, restart
+# omarchy:args=open|login|logout|restart|status|ensure
+#
+# One entry point for everything the plugin does to spotify-player:
+#
+#   open     open the full TUI, or focus it if it's already open
+#   login    sign in to Spotify (two browser approvals)
+#   logout   forget the cached Spotify login
+#   restart  restart the background player
+#   status   print whether the player is running, signed in, and playing
+#   ensure   start the background player if it isn't running (Service.qml
+#            calls this every 15s)
+#
+# The audio comes from `spotify_player -d`, a background daemon with no
+# terminal: it streams through librespot and serves MPRIS for the bar. The TUI
+# is only a remote for it (enable_streaming = "DaemonOnly" in app.toml).
+set -euo pipefail
+
+self="$(readlink -f "${BASH_SOURCE[0]}")"
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/spotify-player"
+state="${XDG_RUNTIME_DIR:-/tmp}/omarchy-spotify"
+app_id="org.omarchy.spotify-tui"
+PATH="$PATH:/usr/share/omarchy/bin"
+
+daemon_running() { pgrep -u "$(id -u)" -xf 'spotify_player -d' >/dev/null; }
+authenticating() { pgrep -u "$(id -u)" -f 'spotify_player authenticate' >/dev/null; }
+signed_in() { [[ -s "$cache/credentials.json" ]]; }
+
+stop_daemon() { pkill -u "$(id -u)" -xf 'spotify_player -d' || true; }
+start_daemon() { daemon_running || spotify_player -d; }
+
+open_url() {
+  echo "==> Opening Spotify login in your browser:"
+  echo "    $1"
+  if command -v uwsm-app >/dev/null 2>&1; then
+    setsid uwsm-app -- xdg-open "$1" >/dev/null 2>&1 &
+  else
+    setsid xdg-open "$1" >/dev/null 2>&1 &
+  fi
+}
+
+cmd_ensure() {
+  command -v spotify_player >/dev/null 2>&1 || exit 0
+  # A daemon started mid-login would fight it for the OAuth callback port.
+  authenticating && exit 0
+
+  if ! signed_in; then
+    # Say so once per session rather than failing silently every 15s.
+    mkdir -p "$state"
+    if [[ ! -e "$state/asked-login" ]]; then
+      touch "$state/asked-login"
+      omarchy-notification-send --app-name spotify-player -g 󰓇 -u normal \
+        "Spotify needs sign-in" "Click to sign in" \
+        --exec omarchy-launch-floating-terminal-with-presentation "$self" login
+    fi
+    exit 0
+  fi
+  start_daemon
+}
+
+cmd_open() {
+  # A window with our app id already open? Focus it instead of opening a second
+  # remote. Its MPRIS server and notifications are off: the daemon already
+  # provides both, and a second copy shows every notification twice.
+  exec omarchy-launch-or-focus-tui --app-id="$app_id" \
+    spotify_player -o enable_media_control=false -o enable_notify=false
+}
+
+# spotify-player runs two OAuth flows back to back -- the Web API token, then
+# the librespot session -- so Spotify asks for two approvals, and the second
+# URL only appears once the first is done. Open each one as it shows up.
+cmd_login() {
+  local log auth_pid rc seen="" url
+  log="$(mktemp -t spotify-player-login.XXXXXX)"
+  # Whatever happens -- success, failure, Ctrl-C -- bring the daemon back.
+  trap 'rm -f "$log"; start_daemon; rm -f "$state/asked-login"' EXIT
+
+  # The daemon holds the OAuth callback port (8989); `ensure` stands down
+  # while the authenticate below runs, so it stays stopped until we're done.
+  if daemon_running; then
+    echo "==> Stopping the background player while signing in"
+    stop_daemon
+  fi
+
+  echo "==> Signing in (expect TWO browser approvals)"
+  spotify_player authenticate >"$log" 2>&1 &
+  auth_pid=$!
+  while kill -0 "$auth_pid" 2>/dev/null; do
+    while read -r url; do
+      case " $seen " in *" $url "*) continue ;; esac
+      seen="$seen $url"
+      open_url "$url"
+    done < <(grep -oE 'https://accounts\.spotify\.com/authorize[A-Za-z0-9._~:/?&=%+-]*' "$log" 2>/dev/null || true)
+    sleep 0.5
+  done
+
+  wait "$auth_pid" && rc=0 || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    cat "$log"
+    echo "==> Sign-in failed (exit $rc)." >&2
+    exit "$rc"
+  fi
+
+  # Reusable Spotify logins; spotify-player writes them world-readable.
+  chmod 700 "$cache"
+  chmod 600 "$cache"/*.json 2>/dev/null || true
+  echo "==> Signed in. Hover the music icon in the bar to control playback."
+}
+
+cmd_logout() {
+  stop_daemon
+  rm -f "$cache/credentials.json" "$cache"/*_token.json
+  rm -f "$state/asked-login"
+  echo "==> Signed out. Run '$(basename "$self") login' to sign in again."
+}
+
+cmd_restart() {
+  stop_daemon
+  sleep 0.5
+  start_daemon
+}
+
+cmd_status() {
+  local playing
+  echo "player:    $(daemon_running && echo running || echo stopped)"
+  echo "signed in: $(signed_in && echo yes || echo no)"
+  if daemon_running; then
+    playing="$(spotify_player get key playback 2>/dev/null |
+      jq -r 'if .item then "\(.item.name) - \([.item.artists[].name] | join(", "))\(if .is_playing then "" else " (paused)" end)" else "nothing" end' 2>/dev/null || true)"
+    echo "playing:   ${playing:-unknown}"
+  fi
+}
+
+case "${1:-}" in
+  open) cmd_open ;;
+  login) cmd_login ;;
+  logout) cmd_logout ;;
+  restart) cmd_restart ;;
+  status) cmd_status ;;
+  ensure) cmd_ensure ;;
+  *) sed -n '5,13p' "$self" | sed 's/^# \?//'; exit 2 ;;
+esac
