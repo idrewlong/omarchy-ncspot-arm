@@ -96,6 +96,12 @@ enable_media_control = true
 # that streams, so it doesn't show in the TUI.
 enable_streaming = "DaemonOnly"
 
+# Your own Spotify app's client ID, if you've set one with
+# `spotify-tui client-id <id>`; otherwise ncspot's, which every ncspot and
+# spotify-player install shares -- and whose rate limit (429s) stalls
+# play/pause and skips when the world is busy. See the README.
+client_id_command = { command = "bash", args = ["-c", "cat \"${XDG_CONFIG_HOME:-$HOME/.config}/spotify-player/client_id\" 2>/dev/null || echo d420a117a32841c2b3474932e49fb54b"] }
+
 # ---------------------------------------------------------------------------
 # Tables. Nothing bare may follow this line.
 # ---------------------------------------------------------------------------

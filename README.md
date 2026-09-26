@@ -30,8 +30,8 @@ neither, and can run as a daemon, so it replaced it in 2.0.)
   open. It's a remote for the background player, not a second player.
 - **Instant track notifications** with cover art, updating in place as you
   skip.
-- **`spotify-tui`** on your `PATH`: `open`, `login`, `logout`, `restart`,
-  `status`.
+- **`spotify-tui`** on your `PATH`: `open`, `login`, `logout`, `client-id`,
+  `restart`, `status`.
 - **A Y2K Windows Media Player theme** for the TUI.
 
 ## Requirements
@@ -62,6 +62,37 @@ notification you can click to start it.
 
 Credentials are cached in `~/.cache/spotify-player/`; the login locks them to
 mode 600, since spotify-player writes them world-readable.
+
+## Use your own Spotify app (recommended)
+
+Out of the box, spotify-player makes its Web API calls (and it makes them
+even for play/pause and skips) under ncspot's client ID, which every ncspot
+and spotify-player install in the world shares. When that shared quota runs
+out, Spotify answers `429 Too Many Requests` and the controls stop working
+until it recovers. Your own app gets its own quota:
+
+1. In the [Spotify developer dashboard](https://developer.spotify.com/dashboard),
+   **Create app**. Name and description can be anything.
+2. **Redirect URI:** exactly `http://127.0.0.1:8989/login` (`127.0.0.1`,
+   not `localhost`; `http`, no trailing slash). Click **Add**.
+3. Tick **Web API**, accept the terms, **Save**.
+4. Copy the **Client ID** from the app's settings (not the secret), then:
+
+   ```sh
+   spotify-tui client-id <your-client-id>
+   ```
+
+That's one browser approval, for your app. The ncspot token and librespot
+login are already cached and are reused. spotify-player still keeps the
+shared ID as a fallback for a few playlist endpoints Spotify restricts for new
+apps, and to retry any request your app gets refused, so there's no option to
+drop it entirely. Apps start in development mode, which only admits
+allowlisted users; if sign-in says your account isn't registered, add it
+under **Settings → User Management**. `spotify-tui client-id --reset` goes
+back to the shared ID.
+
+The ID lives in `~/.config/spotify-player/client_id`, read by `app.toml`'s
+`client_id_command`, so the shipped config works with or without it.
 
 ## How it works
 
@@ -94,10 +125,9 @@ Service.qml ── `spotify-tui ensure` every 15s
 
 ## Known limitations
 
-- **Rate limits.** spotify-player uses a Web API client ID shared with every
-  other spotify-player and ncspot install, so Spotify's `429 Too Many
-  Requests` comes easily, and it stalls play/pause while it lasts. This repo
-  keeps its own API calls to a minimum for that reason.
+- **Rate limits on the shared client ID.** Until you
+  [use your own app](#use-your-own-spotify-app-recommended), play/pause,
+  skips, shuffle and repeat fail whenever the shared quota is exhausted.
 - **No visualizer in the TUI.** The theme turns it on, but it only draws in
   the instance that's streaming, and that's the daemon.
 - **Omarchy's media OSD and `omarchy-shell media` commands** still see the

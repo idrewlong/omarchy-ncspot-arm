@@ -23,15 +23,6 @@ it for the notification and the bar icon, but Omarchy's media OSD and media
 keys still see the lag. An upstream PR that updates the player state straight
 from librespot's `TrackChanged`/`Playing` events would fix it for everyone.
 
-## Use your own Spotify client ID
-
-spotify-player's `client_id` setting (or `client_id_command`) lets each user
-register their own Spotify app instead of sharing ncspot's ID, whose rate
-limit every ncspot and spotify-player install draws from. That's the real fix
-for the `429 Too Many Requests` stalls, at the cost of a setup step (creating
-a Spotify developer app). Worth an optional `spotify-tui` subcommand that
-walks through it.
-
 ## Follow the active Omarchy theme
 
 The Y2K theme is fixed hex. Omarchy renders templates from

@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # omarchy:summary=Spotify on aarch64 Omarchy: open the player, sign in/out, restart
-# omarchy:args=open|login|logout|restart|status|ensure
+# omarchy:args=open|login|logout|client-id|restart|status|ensure
 #
 # One entry point for everything the plugin does to spotify-player:
 #
-#   open     open the full TUI, or focus it if it's already open
-#   login    sign in to Spotify (two browser approvals)
-#   logout   forget the cached Spotify login
-#   restart  restart the background player
-#   status   print whether the player is running, signed in, and playing
-#   ensure   start the background player if it isn't running (Service.qml
-#            calls this every 15s)
+#   open           open the full TUI, or focus it if it's already open
+#   login          sign in to Spotify (browser approvals)
+#   logout         forget the cached Spotify login
+#   client-id ID   use your own Spotify app (see README); --reset to undo
+#   restart        restart the background player
+#   status         print whether the player is running, signed in, and playing
+#   ensure         start the background player if it isn't running
+#                  (Service.qml calls this every 15s)
 #
 # The audio comes from `spotify_player -d`, a background daemon with no
 # terminal: it streams through librespot and serves MPRIS for the bar. The TUI
@@ -21,10 +22,14 @@ self="$(readlink -f "${BASH_SOURCE[0]}")"
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/spotify-player"
 state="${XDG_RUNTIME_DIR:-/tmp}/omarchy-spotify"
 app_id="org.omarchy.spotify-tui"
+client_id_file="${XDG_CONFIG_HOME:-$HOME/.config}/spotify-player/client_id"
+ncspot_client_id="d420a117a32841c2b3474932e49fb54b"
 PATH="$PATH:/usr/share/omarchy/bin"
 
 daemon_running() { pgrep -u "$(id -u)" -xf 'spotify_player -d' >/dev/null; }
-authenticating() { pgrep -u "$(id -u)" -f 'spotify_player authenticate' >/dev/null; }
+# Set while a sign-in runs. `ensure` stands down meanwhile: a daemon started
+# mid-sign-in would fight it for the OAuth callback port (8989).
+signing_in() { [[ -e "$state/signing-in" ]] && kill -0 "$(cat "$state/signing-in")" 2>/dev/null; }
 signed_in() { [[ -s "$cache/credentials.json" ]]; }
 
 stop_daemon() { pkill -u "$(id -u)" -xf 'spotify_player -d' || true; }
@@ -42,8 +47,7 @@ open_url() {
 
 cmd_ensure() {
   command -v spotify_player >/dev/null 2>&1 || exit 0
-  # A daemon started mid-login would fight it for the OAuth callback port.
-  authenticating && exit 0
+  signing_in && exit 0
 
   if ! signed_in; then
     # Say so once per session rather than failing silently every 15s.
@@ -67,26 +71,30 @@ cmd_open() {
     spotify_player -o enable_media_control=false -o enable_notify=false
 }
 
-# spotify-player runs two OAuth flows back to back -- the Web API token, then
-# the librespot session -- so Spotify asks for two approvals, and the second
-# URL only appears once the first is done. Open each one as it shows up.
-cmd_login() {
-  local log auth_pid rc seen="" url
-  log="$(mktemp -t spotify-player-login.XXXXXX)"
+# Run a spotify_player command that may need browser approvals, opening each
+# "Browse to:" URL as it appears. spotify-player can ask for several in a row
+# (Web API token, ncspot fallback token, librespot session), and each URL only
+# appears once the previous one is approved.
+sign_in_with() {
+  local pid rc seen="" url
+  # Global, not local: the EXIT trap runs after this function has returned.
+  sign_in_log="$(mktemp -t spotify-tui-login.XXXXXX)"
+  local log="$sign_in_log"
+  mkdir -p "$state"
+  echo $$ > "$state/signing-in"
   # Whatever happens -- success, failure, Ctrl-C -- bring the daemon back.
-  trap 'rm -f "$log"; start_daemon; rm -f "$state/asked-login"' EXIT
+  trap 'rm -f "$sign_in_log" "$state/signing-in" "$state/asked-login"; start_daemon' EXIT
 
-  # The daemon holds the OAuth callback port (8989); `ensure` stands down
-  # while the authenticate below runs, so it stays stopped until we're done.
+  # The daemon holds the OAuth callback port.
   if daemon_running; then
     echo "==> Stopping the background player while signing in"
     stop_daemon
+    sleep 0.5
   fi
 
-  echo "==> Signing in (expect TWO browser approvals)"
-  spotify_player authenticate >"$log" 2>&1 &
-  auth_pid=$!
-  while kill -0 "$auth_pid" 2>/dev/null; do
+  "$@" >"$log" 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
     while read -r url; do
       case " $seen " in *" $url "*) continue ;; esac
       seen="$seen $url"
@@ -95,7 +103,7 @@ cmd_login() {
     sleep 0.5
   done
 
-  wait "$auth_pid" && rc=0 || rc=$?
+  wait "$pid" && rc=0 || rc=$?
   if [[ $rc -ne 0 ]]; then
     cat "$log"
     echo "==> Sign-in failed (exit $rc)." >&2
@@ -105,7 +113,50 @@ cmd_login() {
   # Reusable Spotify logins; spotify-player writes them world-readable.
   chmod 700 "$cache"
   chmod 600 "$cache"/*.json 2>/dev/null || true
+}
+
+cmd_login() {
+  # `authenticate` redoes every sign-in, cached or not.
+  echo "==> Signing in (expect two or three browser approvals)"
+  sign_in_with spotify_player authenticate
   echo "==> Signed in. Hover the music icon in the bar to control playback."
+}
+
+# Point spotify-player at your own Spotify app, so its Web API calls (play,
+# pause, skip...) draw on your own rate limit instead of the one every ncspot
+# and spotify-player install shares. app.toml's client_id_command reads this
+# file. Signs in only what isn't cached: a CLI call with no daemon running
+# starts its own client, which prompts just for missing tokens -- normally
+# only the new app's.
+cmd_client_id() {
+  local id="${1:-}"
+  case "$id" in
+    "")
+      if [[ -s "$client_id_file" ]]; then
+        echo "own app: $(cat "$client_id_file")"
+      else
+        echo "shared (ncspot's): $ncspot_client_id"
+      fi
+      return
+      ;;
+    --reset)
+      rm -f "$client_id_file"
+      echo "==> Back to the shared client ID"
+      cmd_restart
+      return
+      ;;
+  esac
+  if [[ ! "$id" =~ ^[0-9a-f]{32}$ ]]; then
+    echo "a client ID is 32 lowercase hex characters (got: $id)" >&2
+    exit 2
+  fi
+
+  mkdir -p "$(dirname "$client_id_file")"
+  printf '%s\n' "$id" > "$client_id_file"
+  echo "==> Using your Spotify app ($id)"
+  echo "==> Approve it in your browser (redirect URI must be http://127.0.0.1:8989/login)"
+  sign_in_with spotify_player get key devices
+  echo "==> Done. Web API calls now go through your app."
 }
 
 cmd_logout() {
@@ -125,6 +176,7 @@ cmd_status() {
   local playing
   echo "player:    $(daemon_running && echo running || echo stopped)"
   echo "signed in: $(signed_in && echo yes || echo no)"
+  echo "client ID: $([[ -s "$client_id_file" ]] && echo "own app ($(cat "$client_id_file"))" || echo "shared (ncspot's)")"
   if daemon_running; then
     playing="$(spotify_player get key playback 2>/dev/null |
       jq -r 'if .item then "\(.item.name) - \([.item.artists[].name] | join(", "))\(if .is_playing then "" else " (paused)" end)" else "nothing" end' 2>/dev/null || true)"
@@ -135,9 +187,10 @@ cmd_status() {
 case "${1:-}" in
   open) cmd_open ;;
   login) cmd_login ;;
+  client-id) cmd_client_id "${2:-}" ;;
   logout) cmd_logout ;;
   restart) cmd_restart ;;
   status) cmd_status ;;
   ensure) cmd_ensure ;;
-  *) sed -n '5,13p' "$self" | sed 's/^# \?//'; exit 2 ;;
+  *) sed -n '5,14p' "$self" | sed 's/^# \?//'; exit 2 ;;
 esac
