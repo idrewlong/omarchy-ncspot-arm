@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Mpris
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // A music icon for the bar. Hovering it shows a mini player (cover, track,
@@ -193,8 +194,8 @@ BarWidget {
           width: Style.space(64)
           height: Style.space(64)
           radius: Style.spacing.labelGap
-          color: Style.normalFillFor(root.bar.foreground, Color.accent)
-          borderSpec: Border.controlSpec("normal", root.bar.foreground, Color.accent)
+          color: Style.normalFillFor(root.bar.foreground, Commons.Color.accent)
+          borderSpec: Border.controlSpec("normal", root.bar.foreground, Commons.Color.accent)
 
           Image {
             anchors.fill: parent
@@ -258,7 +259,7 @@ BarWidget {
         Rectangle {
           height: parent.height
           radius: parent.radius
-          color: Color.accent
+          color: Commons.Color.accent
           width: parent.valid ? parent.width * Math.min(1, root.player.position / root.player.length) : 0
           Behavior on width { NumberAnimation { duration: 900; easing.type: Easing.Linear } }
         }
